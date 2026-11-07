@@ -1,0 +1,17 @@
+Subject: Invitation to list {{.CompanyName}} on {{.SiteName}} (free, optional)
+
+Hello {{.ContactName}},
+
+I'm {{.SenderName}}, building {{.SiteName}}, an independent directory of Indian manufacturers and suppliers that is currently in beta.
+
+I came across {{.CompanyName}} {{.HowFound}} and wanted to ask, personally, whether you would like a free basic listing. You decide what is shared:
+- Your details stay private unless you choose to allow a public profile.
+- Commercial/API distribution of your business details only happens if you separately agree to it.
+- You can correct or remove your information at any time.
+
+If you are interested, the form takes about five minutes: {{.SiteURL}}/register-supplier
+
+If you would prefer not to hear from me again, just reply "no" and I won't contact you further.
+
+Thank you,
+{{.SenderName}}

@@ -1,0 +1,23 @@
+Subject: We received your registration for {{.CompanyName}}
+
+Hello {{.SubmitterName}},
+
+Thank you for registering {{.CompanyName}} with {{.SiteName}} (beta).
+
+What happens next
+- A person on our team will review the details you sent. Nothing is published before that review.
+- If you allowed public listing, we may publish a basic profile after review. If you did not, your details stay private.
+- We do not promise enquiries, leads or rankings.
+
+Your choices (recorded {{.SubmittedAt}}):
+- Public listing: {{if .PublicListing}}allowed{{else}}not allowed{{end}}
+- Future commercial/API distribution of business details: {{if .CommercialAPI}}allowed{{else}}not allowed{{end}}
+
+You can correct your details, withdraw these permissions or ask us to delete your submission at any time:
+{{.SiteURL}}/request-correction
+
+Reference: {{.SubmissionID}}
+Privacy notice version: {{.NoticeVersion}} ({{.SiteURL}}/privacy)
+
+— {{.SiteName}}
+This is an automated message about your submission. We will not add you to any mailing list.

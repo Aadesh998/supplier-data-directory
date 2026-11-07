@@ -1,0 +1,11 @@
+Subject: We received your {{.RequestTypeLabel}} request
+
+Hello {{.RequesterName}},
+
+We received your request ({{.RequestTypeLabel}}) on {{.ReceivedAt}}. A person will review it and reply. We aim to respond within 7 days.
+
+Reference: {{.RequestID}}
+
+If you did not make this request, you can ignore this email.
+
+— {{.SiteName}}

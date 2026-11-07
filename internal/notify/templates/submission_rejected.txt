@@ -1,0 +1,13 @@
+Subject: About your registration for {{.CompanyName}}
+
+Hello,
+
+{{if eq .Status "needs_changes"}}We need a little more information before we can add {{.CompanyName}} to the directory.{{else}}We were unable to add {{.CompanyName}} to the directory at this time.{{end}}
+
+Reason: {{.Reason}}
+
+{{if eq .Status "needs_changes"}}You are welcome to submit the registration again with the requested changes: {{.SiteURL}}/register-supplier{{end}}
+
+If you would like us to delete your submission, reply via {{.SiteURL}}/request-correction (reference {{.SubmissionID}}). Rejected submissions are deleted automatically after 180 days.
+
+— {{.SiteName}}

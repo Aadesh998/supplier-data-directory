@@ -1,0 +1,13 @@
+Subject: Your registration for {{.CompanyName}} has been reviewed
+
+Hello,
+
+We have reviewed the registration for {{.CompanyName}} and added it to our directory database.
+
+{{if .PublicListing}}You allowed public listing, so we may publish a basic profile. Publication is a separate step and we will only show the business fields you provided. A published profile does not mean we have verified every detail; verification labels on the profile show what has been checked.{{else}}You did not allow public listing, so the record is kept private and used only for internal review.{{end}}
+
+To correct details, withdraw a permission or request removal: {{.SiteURL}}/request-correction
+
+Reference: {{.SubmissionID}}
+
+— {{.SiteName}}

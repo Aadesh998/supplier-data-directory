@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+bin/
+apps/web/node_modules/
+apps/web/.next/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/next-env.d.ts
+*.local

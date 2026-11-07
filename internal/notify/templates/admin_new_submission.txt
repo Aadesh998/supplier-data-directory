@@ -1,0 +1,7 @@
+Subject: New supplier registration awaiting review
+
+A new supplier registration was received and is waiting for review.
+
+Review it in the admin console: {{.SiteURL}}/admin/submissions/{{.SubmissionID}}
+
+(Details are intentionally not included in this email.)

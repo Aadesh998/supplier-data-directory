@@ -1,0 +1,32 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# The API does not serve its OpenAPI document in production; block the path anyway.
+	@internal path /api/v1/openapi.yaml
+	respond @internal 404
+
+	# Caddy ignores X-Forwarded-For from untrusted clients and sets the real client IP.
+	# Verified locally: spoofed headers do not bypass the API's per-IP login limit behind Caddy.
+	reverse_proxy web:3000
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}

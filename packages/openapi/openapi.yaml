@@ -1,0 +1,930 @@
+openapi: 3.1.0
+info:
+  title: Bharat Manufacturing Directory API
+  version: 1.0.0
+  description: |
+    Internal REST API for the Bharat Manufacturing Directory MVP.
+
+    * Public endpoints return **only** published companies and **only** fields whose
+      provenance permits public display. Personal contacts are never returned.
+    * Admin endpoints require a session cookie (`bm_session`) obtained from
+      `POST /api/v1/admin/login`. Every mutating admin request must also send the
+      `X-CSRF-Token` header with the token returned by login or `GET /api/v1/admin/me`.
+    * Errors always use the shape `{"error":{"code","message","request_id","details?"}}`.
+    * List endpoints accept `page` (1-based, default 1) and `limit` (default 20, max 100)
+      and return `{"data":[...],"page":{"page","limit","total","has_more"}}`.
+    * No external API consumers are enabled in v1.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: health
+  - name: public
+  - name: admin-auth
+  - name: admin
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: bm_session
+    csrf:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+  parameters:
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code: { type: string, examples: [validation_failed, not_found, unauthorized, forbidden, csrf_failed, rate_limited, conflict, publish_blocked, gone] }
+            message: { type: string }
+            request_id: { type: string }
+            details: { type: object, additionalProperties: true, description: 'For validation_failed: {"fields": {"company.display_name": "is required"}}. For publish_blocked: {"reasons": [..]}.' }
+    PageInfo:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        has_more: { type: boolean }
+    CategoryRef:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+    Category:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        parent_id: { type: [string, 'null'], format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        category_type: { type: string, enum: [industry, product_category, service, trade] }
+        description: { type: string }
+        sort_order: { type: integer }
+        active: { type: boolean }
+        published_company_count: { type: integer, description: Number of published companies in this category or any descendant. }
+    CategoryNode:
+      allOf:
+        - $ref: '#/components/schemas/Category'
+        - type: object
+          properties:
+            children: { type: array, items: { $ref: '#/components/schemas/CategoryNode' } }
+    CategoryDetail:
+      type: object
+      properties:
+        category: { $ref: '#/components/schemas/Category' }
+        ancestors: { type: array, items: { $ref: '#/components/schemas/CategoryRef' }, description: Root first. }
+        children: { type: array, items: { $ref: '#/components/schemas/Category' } }
+    State:
+      type: object
+      properties:
+        code: { type: string, examples: [MH] }
+        name: { type: string }
+        slug: { type: string }
+        region_type: { type: string, enum: [state, union_territory] }
+        published_company_count: { type: integer }
+    Role:
+      type: object
+      properties:
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+    PublicCompanySummary:
+      type: object
+      description: Only fields with public-display permission are present; absent fields are omitted, not null.
+      properties:
+        slug: { type: string }
+        display_name: { type: string }
+        description: { type: string }
+        city: { type: string }
+        state_code: { type: string }
+        state_name: { type: string }
+        roles: { type: array, items: { type: string } }
+        categories: { type: array, items: { $ref: '#/components/schemas/CategoryRef' } }
+        verification_status: { type: string, enum: [unverified, partially_verified, verified, stale] }
+        updated_at: { type: string, format: date-time }
+    PublicCompany:
+      allOf:
+        - $ref: '#/components/schemas/PublicCompanySummary'
+        - type: object
+          properties:
+            legal_name: { type: string }
+            website_url: { type: string }
+            establishment_year: { type: integer }
+            facilities:
+              type: array
+              items:
+                type: object
+                properties:
+                  facility_type: { type: string }
+                  locality: { type: string }
+                  city: { type: string }
+                  district: { type: string }
+                  state_code: { type: string }
+                  state_name: { type: string }
+            products:
+              type: array
+              items:
+                type: object
+                properties:
+                  name: { type: string }
+                  description: { type: string }
+                  category: { $ref: '#/components/schemas/CategoryRef' }
+            capabilities:
+              type: array
+              items:
+                type: object
+                properties:
+                  slug: { type: string }
+                  name: { type: string }
+                  verification_status: { type: string }
+            certifications:
+              type: array
+              items:
+                type: object
+                properties:
+                  certification_type: { type: string }
+                  issuer: { type: string }
+                  status: { type: string, enum: [claimed, unverified, verified, expired, revoked, rejected] }
+            contacts:
+              type: array
+              description: Business contacts only (never individuals), and only if marked public with a recorded basis.
+              items:
+                type: object
+                properties:
+                  contact_type: { type: string, enum: [public_business_email, switchboard, sales_department] }
+                  channel: { type: string, enum: [email, phone, url] }
+                  label: { type: string }
+                  value: { type: string }
+            source_labels: { type: array, items: { type: string }, examples: [['Submitted by the business']] }
+            published_at: { type: string, format: date-time }
+            last_verified_at: { type: string, format: date-time }
+    SupplierSubmissionRequest:
+      type: object
+      required: [company, roles, categories, facilities, submitter, consents, privacy_notice_version, form_started_at]
+      properties:
+        company:
+          type: object
+          required: [display_name]
+          properties:
+            display_name: { type: string, minLength: 2, maxLength: 200 }
+            legal_name: { type: string, maxLength: 200 }
+            description: { type: string, maxLength: 2000 }
+            website_url: { type: string, format: uri, description: 'http(s) only' }
+            establishment_year: { type: integer, minimum: 1800 }
+        roles: { type: array, minItems: 1, maxItems: 8, items: { type: string, description: business role code } }
+        categories: { type: array, minItems: 1, maxItems: 10, items: { type: string, description: category slug } }
+        products:
+          type: array
+          maxItems: 30
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string, maxLength: 200 }
+              description: { type: string, maxLength: 1000 }
+              unit: { type: string, maxLength: 50 }
+        facilities:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            required: [facility_type, city, state_code]
+            properties:
+              facility_type: { type: string, enum: [factory, office, registered_office, warehouse, showroom, workshop, laboratory, other] }
+              address_line1: { type: string, maxLength: 200 }
+              locality: { type: string, maxLength: 120 }
+              city: { type: string, maxLength: 120 }
+              district: { type: string, maxLength: 120 }
+              state_code: { type: string, pattern: '^[A-Z]{2}$' }
+              postal_code: { type: string, pattern: '^[1-9][0-9]{5}$' }
+        business_contacts:
+          type: array
+          maxItems: 5
+          description: Business (not personal) contact points that may be shown if public listing is authorised.
+          items:
+            type: object
+            required: [contact_type, channel, value]
+            properties:
+              contact_type: { type: string, enum: [public_business_email, switchboard, sales_department] }
+              channel: { type: string, enum: [email, phone] }
+              value: { type: string, maxLength: 200 }
+        submitter:
+          type: object
+          description: Personal details of the person submitting. Stored privately, never published.
+          required: [name, email]
+          properties:
+            name: { type: string, maxLength: 120 }
+            email: { type: string, format: email }
+            designation: { type: string, maxLength: 120 }
+            phone: { type: string, maxLength: 30 }
+        consents:
+          type: object
+          required: [privacy_notice_acknowledged, public_listing, commercial_api]
+          properties:
+            privacy_notice_acknowledged: { type: boolean, description: Must be true. }
+            public_listing: { type: boolean, description: 'Optional permission to publish a public profile after review.' }
+            commercial_api: { type: boolean, description: 'Optional permission for future commercial/API distribution of business fields.' }
+        privacy_notice_version: { type: string, examples: ['2026-11-v1'] }
+        form_started_at: { type: integer, description: Unix epoch milliseconds when the form was opened (anti-spam timing). }
+        website_confirm: { type: string, description: 'Honeypot. Must be empty. Hide it from humans.' }
+    PrivacyRequest:
+      type: object
+      required: [request_type, requester_name, email]
+      properties:
+        request_type: { type: string, enum: [correction, removal, withdraw_public_listing, withdraw_commercial_api, access, other] }
+        requester_name: { type: string, maxLength: 200 }
+        email: { type: string, format: email }
+        company_reference: { type: string, maxLength: 300, description: Company name or profile URL/slug. }
+        details: { type: string, maxLength: 5000 }
+        website_confirm: { type: string, description: Honeypot. Must be empty. }
+    AdminUser:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        display_name: { type: string }
+        role: { type: string, enum: [owner, admin, reviewer] }
+        active: { type: boolean }
+        last_login_at: { type: [string, 'null'], format: date-time }
+    Session:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/AdminUser' }
+        csrf_token: { type: string }
+    DataSource:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        source_type: { type: string, enum: [self_submission, authorized_import, official_site, licensed_feed, permitted_api_lookup, manual_verification] }
+        provider: { type: string }
+        source_url: { type: [string, 'null'] }
+        license_reference: { type: [string, 'null'] }
+        collected_at: { type: string, format: date-time }
+        allowed_internal_use: { type: boolean }
+        allowed_public_display: { type: boolean }
+        allowed_commercial_api: { type: boolean }
+        retention_expires_at: { type: [string, 'null'], format: date-time }
+        notes: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    DataSourceInput:
+      type: object
+      required: [source_type, provider]
+      properties:
+        source_type: { type: string }
+        provider: { type: string }
+        source_url: { type: string }
+        license_reference: { type: string }
+        allowed_internal_use: { type: boolean, default: false }
+        allowed_public_display: { type: boolean, default: false }
+        allowed_commercial_api: { type: boolean, default: false }
+        retention_expires_at: { type: string, format: date-time }
+        notes: { type: string }
+    AdminCompanySummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        legal_name: { type: [string, 'null'] }
+        slug: { type: string }
+        publication_status: { type: string, enum: [draft, submitted, under_review, approved_private, published, rejected, needs_changes, archived] }
+        verification_status: { type: string, enum: [unverified, partially_verified, verified, stale] }
+        city: { type: [string, 'null'] }
+        state_code: { type: [string, 'null'] }
+        website_domain: { type: [string, 'null'] }
+        roles: { type: array, items: { type: string } }
+        categories: { type: array, items: { $ref: '#/components/schemas/CategoryRef' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Facility:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        facility_type: { type: string }
+        name: { type: [string, 'null'] }
+        address_line1: { type: [string, 'null'] }
+        address_line2: { type: [string, 'null'] }
+        locality: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        district: { type: [string, 'null'] }
+        state_code: { type: [string, 'null'] }
+        postal_code: { type: [string, 'null'] }
+        is_primary: { type: boolean }
+        verification_status: { type: string }
+        source_id: { type: [string, 'null'], format: uuid }
+    Product:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        unit: { type: [string, 'null'] }
+        category: { oneOf: [{ $ref: '#/components/schemas/CategoryRef' }, { type: 'null' }] }
+        source_id: { type: [string, 'null'], format: uuid }
+    Contact:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contact_type: { type: string }
+        channel: { type: string }
+        label: { type: [string, 'null'] }
+        value: { type: string, description: 'Individual contacts are returned masked (e.g. "r•••@•••.com").' }
+        masked: { type: boolean }
+        is_public: { type: boolean }
+        lawful_basis_or_permission_ref: { type: [string, 'null'] }
+        source_id: { type: [string, 'null'], format: uuid }
+    Provenance:
+      type: object
+      properties:
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        field_name: { type: string }
+        permission_status: { type: string, enum: [unknown, permitted, restricted, withdrawn] }
+        observed_at: { type: string, format: date-time }
+        source: { $ref: '#/components/schemas/DataSource' }
+    VerificationEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        field_name: { type: [string, 'null'] }
+        method: { type: string }
+        result: { type: string }
+        notes: { type: [string, 'null'] }
+        checked_at: { type: string, format: date-time }
+        checked_by: { type: string, description: reviewer email }
+        next_review_at: { type: [string, 'null'], format: date-time }
+    AdminCompany:
+      allOf:
+        - $ref: '#/components/schemas/AdminCompanySummary'
+        - type: object
+          properties:
+            normalized_name: { type: string }
+            description: { type: [string, 'null'] }
+            website_url: { type: [string, 'null'] }
+            establishment_year: { type: [integer, 'null'] }
+            business_status: { type: string, enum: [active, inactive, closed, unknown] }
+            primary_category_id: { type: [string, 'null'], format: uuid }
+            published_at: { type: [string, 'null'], format: date-time }
+            last_verified_at: { type: [string, 'null'], format: date-time }
+            next_review_at: { type: [string, 'null'], format: date-time }
+            facilities: { type: array, items: { $ref: '#/components/schemas/Facility' } }
+            products: { type: array, items: { $ref: '#/components/schemas/Product' } }
+            capabilities: { type: array, items: { type: object, properties: { id: { type: string }, slug: { type: string }, name: { type: string }, verification_status: { type: string } } } }
+            certifications: { type: array, items: { type: object, properties: { id: { type: string }, certification_type: { type: string }, issuer: { type: [string, 'null'] }, status: { type: string } } } }
+            contacts: { type: array, items: { $ref: '#/components/schemas/Contact' } }
+            provenance: { type: array, items: { $ref: '#/components/schemas/Provenance' } }
+            verification_events: { type: array, items: { $ref: '#/components/schemas/VerificationEvent' } }
+            publish_check:
+              type: object
+              properties:
+                allowed: { type: boolean }
+                reasons: { type: array, items: { type: string } }
+    CompanyInput:
+      type: object
+      description: For PATCH all fields are optional. `source_id` is required whenever data fields are supplied, so every field has provenance.
+      properties:
+        source_id: { type: string, format: uuid }
+        display_name: { type: string }
+        legal_name: { type: string }
+        description: { type: string }
+        website_url: { type: string }
+        establishment_year: { type: integer }
+        business_status: { type: string }
+        primary_category_id: { type: string, format: uuid }
+        slug: { type: string, description: 'PATCH only. Old slug becomes a redirect.' }
+        roles: { type: array, items: { type: string } }
+        category_ids: { type: array, items: { type: string, format: uuid } }
+        publication_status: { type: string, description: 'PATCH only; any status except published (use /publish).' }
+    Submission:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [submitted, under_review, approved, rejected, needs_changes, spam, withdrawn] }
+        company_name: { type: string }
+        submitted_at: { type: string, format: date-time }
+        reviewed_at: { type: [string, 'null'], format: date-time }
+        privacy_notice_version: { type: string }
+        consents:
+          type: object
+          properties:
+            storage_acknowledged_at: { type: string, format: date-time }
+            public_listing_at: { type: [string, 'null'], format: date-time }
+            commercial_api_at: { type: [string, 'null'], format: date-time }
+        company_id: { type: [string, 'null'], format: uuid }
+    SubmissionDetail:
+      allOf:
+        - $ref: '#/components/schemas/Submission'
+        - type: object
+          properties:
+            payload: { $ref: '#/components/schemas/SupplierSubmissionRequest' }
+            submitter_email: { type: string, description: Decrypted for reviewers; access is audit-logged. }
+            review_notes: { type: [string, 'null'] }
+    ImportJob:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        filename: { type: string }
+        status: { type: string, enum: [uploaded, staged, committed, failed, rolled_back, cancelled] }
+        headers: { type: array, items: { type: string } }
+        column_mapping: { type: object, additionalProperties: { type: string }, description: 'target field -> CSV header' }
+        total_rows: { type: integer }
+        valid_rows: { type: integer }
+        error_rows: { type: integer }
+        duplicate_rows: { type: integer }
+        committed_rows: { type: integer }
+        source: { $ref: '#/components/schemas/DataSource' }
+        created_at: { type: string, format: date-time }
+        committed_at: { type: [string, 'null'], format: date-time }
+    ImportRow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        row_number: { type: integer }
+        raw_data: { type: object, additionalProperties: { type: string } }
+        normalized_data: { type: object, additionalProperties: true }
+        transformation_log: { type: array, items: { type: string } }
+        validation_errors: { type: array, items: { type: object, properties: { field: { type: string }, message: { type: string } } } }
+        validation_warnings: { type: array, items: { type: object, properties: { field: { type: string }, message: { type: string } } } }
+        duplicate_candidates: { type: array, items: { type: object, properties: { company_id: { type: string }, display_name: { type: string }, score: { type: number }, reasons: { type: array, items: { type: string } } } } }
+        disposition: { type: string, enum: [pending, accepted, rejected, merged] }
+        matched_company_id: { type: [string, 'null'] }
+        created_company_id: { type: [string, 'null'] }
+    ImportField:
+      type: object
+      properties:
+        field: { type: string, examples: [display_name] }
+        label: { type: string }
+        required: { type: boolean }
+        description: { type: string }
+    CommitResult:
+      type: object
+      properties:
+        dry_run: { type: boolean }
+        created: { type: integer }
+        merged: { type: integer }
+        skipped: { type: integer }
+        rejected: { type: integer }
+        errors: { type: array, items: { type: object, properties: { row_number: { type: integer }, message: { type: string } } } }
+    DuplicatePair:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        score: { type: number }
+        reasons: { type: array, items: { type: string } }
+        status: { type: string, enum: [open, merged, dismissed] }
+        company_a: { $ref: '#/components/schemas/AdminCompanySummary' }
+        company_b: { $ref: '#/components/schemas/AdminCompanySummary' }
+        created_at: { type: string, format: date-time }
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string }
+        actor_email: { type: [string, 'null'] }
+        actor_type: { type: string }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: [string, 'null'] }
+        before: { type: [object, 'null'] }
+        after: { type: [object, 'null'] }
+        request_id: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    PrivacyRequestRecord:
+      type: object
+      properties:
+        id: { type: string }
+        request_type: { type: string }
+        requester: { type: string }
+        email: { type: string }
+        company_id: { type: [string, 'null'] }
+        company_reference: { type: [string, 'null'] }
+        details: { type: [string, 'null'] }
+        status: { type: string, enum: [received, in_progress, resolved, rejected] }
+        received_at: { type: string, format: date-time }
+        resolved_at: { type: [string, 'null'] }
+        resolution_notes: { type: [string, 'null'] }
+    Stats:
+      type: object
+      properties:
+        companies_by_publication_status: { type: object, additionalProperties: { type: integer } }
+        companies_by_verification_status: { type: object, additionalProperties: { type: integer } }
+        submissions_pending: { type: integer }
+        imports_staged: { type: integer }
+        open_duplicates: { type: integer }
+        privacy_requests_open: { type: integer }
+        due_for_review: { type: integer }
+    DiscoveryResult:
+      type: object
+      description: Transient. Shown to the admin only, never stored except the place identifier when saved as a lead.
+      properties:
+        provider_place_id: { type: string }
+        display_name: { type: string }
+        formatted_address: { type: string }
+        google_maps_uri: { type: string }
+    DiscoveryLead:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        provider_place_id: { type: string }
+        search_query: { type: [string, 'null'] }
+        status: { type: string, enum: [new, invited, registered, dismissed] }
+        notes: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+
+paths:
+  /healthz:
+    get: { tags: [health], summary: Liveness, responses: { '200': { description: ok } } }
+  /readyz:
+    get: { tags: [health], summary: Readiness (database reachable), responses: { '200': { description: ok }, '503': { description: not ready } } }
+
+  /api/v1/categories:
+    get:
+      tags: [public]
+      summary: Flat list of active categories with published counts
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Category' } } } } } } } }
+  /api/v1/categories/tree:
+    get:
+      tags: [public]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/CategoryNode' } } } } } } } }
+  /api/v1/categories/{slug}:
+    get:
+      tags: [public]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/CategoryDetail' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /api/v1/states:
+    get:
+      tags: [public]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/State' } } } } } } } }
+  /api/v1/roles:
+    get:
+      tags: [public]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Role' } } } } } } } }
+  /api/v1/public/companies:
+    get:
+      tags: [public]
+      summary: Search published companies
+      parameters:
+        - { name: q, in: query, schema: { type: string, maxLength: 100 } }
+        - { name: category, in: query, schema: { type: string }, description: 'category slug; includes descendants' }
+        - { name: state, in: query, schema: { type: string }, description: 'state code (MH) or state slug' }
+        - { name: city, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/PublicCompanySummary' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } }
+  /api/v1/public/companies/{slug}:
+    get:
+      tags: [public]
+      parameters: [{ name: slug, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/PublicCompany' } } } }
+        '301': { description: 'Slug changed. Body `{"redirect_slug": "new-slug"}` and Location header.' }
+        '404': { $ref: '#/components/responses/Error' }
+        '410': { description: 'Profile was public but has been removed.', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/public/sitemap:
+    get:
+      tags: [public]
+      summary: Indexable public routes only
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  companies: { type: array, items: { type: object, properties: { slug: { type: string }, updated_at: { type: string, format: date-time } } } }
+                  categories: { type: array, items: { type: object, properties: { slug: { type: string }, updated_at: { type: string, format: date-time } } } }
+                  states: { type: array, items: { type: object, properties: { slug: { type: string } } } }
+  /api/v1/supplier-submissions:
+    post:
+      tags: [public]
+      parameters: [{ name: Idempotency-Key, in: header, schema: { type: string, minLength: 8, maxLength: 128 } }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SupplierSubmissionRequest' } } } }
+      responses:
+        '202': { description: accepted, content: { application/json: { schema: { type: object, properties: { id: { type: string }, status: { type: string }, message: { type: string } } } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/privacy-requests:
+    post:
+      tags: [public]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PrivacyRequest' } } } }
+      responses:
+        '202': { description: accepted, content: { application/json: { schema: { type: object, properties: { id: { type: string }, status: { type: string }, message: { type: string } } } } } }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/v1/admin/login:
+    post:
+      tags: [admin-auth]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email, password], properties: { email: { type: string }, password: { type: string } } } } } }
+      responses:
+        '200': { description: 'Sets bm_session cookie', content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/logout:
+    post: { tags: [admin-auth], security: [{ session: [], csrf: [] }], responses: { '204': { description: logged out } } }
+  /api/v1/admin/me:
+    get:
+      tags: [admin-auth]
+      security: [{ session: [] }]
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /api/v1/admin/stats:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/Stats' } } } } } }
+  /api/v1/admin/companies:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: publication_status, in: query, schema: { type: string } }
+        - { name: verification_status, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/AdminCompanySummary' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CompanyInput' } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } }
+  /api/v1/admin/companies/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } } }
+    patch:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CompanyInput' } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } }
+  /api/v1/admin/companies/{id}/facilities:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { allOf: [{ $ref: '#/components/schemas/Facility' }, { type: object, required: [source_id], properties: { source_id: { type: string } } }] } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } }
+  /api/v1/admin/companies/{id}/facilities/{facilityId}:
+    delete: { tags: [admin], security: [{ session: [], csrf: [] }], parameters: [{ $ref: '#/components/parameters/Id' }, { name: facilityId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } } }
+  /api/v1/admin/companies/{id}/products:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, source_id], properties: { name: { type: string }, description: { type: string }, unit: { type: string }, category_id: { type: string }, source_id: { type: string } } } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } }
+  /api/v1/admin/companies/{id}/products/{productId}:
+    delete: { tags: [admin], security: [{ session: [], csrf: [] }], parameters: [{ $ref: '#/components/parameters/Id' }, { name: productId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } } }
+  /api/v1/admin/companies/{id}/verify:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [method, result], properties: { method: { type: string, enum: [supplier_confirmation, official_document, website_check, manual_review, phone_call] }, result: { type: string, enum: [confirmed, partially_confirmed, not_confirmed, inconclusive] }, field_name: { type: string }, notes: { type: string }, next_review_days: { type: integer, minimum: 1, maximum: 1095, default: 365 } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } }
+  /api/v1/admin/companies/{id}/publish:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } }
+        '422': { description: 'code=publish_blocked, details.reasons lists why', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/admin/companies/{id}/unpublish:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } }
+  /api/v1/admin/companies/{id}/archive:
+    post: { tags: [admin], security: [{ session: [], csrf: [] }], parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCompany' } } } } } }
+
+  /api/v1/admin/submissions:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters: [{ name: status, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Submission' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+  /api/v1/admin/submissions/{id}:
+    get: { tags: [admin], security: [{ session: [] }], parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/SubmissionDetail' } } } } } }
+  /api/v1/admin/submissions/{id}/approve:
+    post:
+      tags: [admin]
+      summary: Creates an approved_private company with provenance. Does not publish.
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { notes: { type: string } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { submission: { $ref: '#/components/schemas/Submission' }, company_id: { type: string } } } } } } }
+  /api/v1/admin/submissions/{id}/reject:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string }, status: { type: string, enum: [rejected, needs_changes, spam], default: rejected } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { submission: { $ref: '#/components/schemas/Submission' } } } } } } }
+
+  /api/v1/admin/import-fields:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/ImportField' } } } } } } } } }
+  /api/v1/admin/imports:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/ImportJob' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+    post:
+      tags: [admin]
+      summary: Upload a CSV with a mandatory data-origin declaration
+      security: [{ session: [], csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'CSV, max 10 MB, max 20,000 rows' }
+                source_id: { type: string, format: uuid, description: 'Existing data source. Either this or `source` is required.' }
+                source: { type: string, description: 'JSON-encoded DataSourceInput for a new source' }
+                column_mapping: { type: string, description: 'Optional JSON object target_field -> CSV header. Auto-detected if omitted.' }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/ImportJob' } } } }
+        '409': { description: 'Same file already imported for this source', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/admin/imports/{id}:
+    get: { tags: [admin], security: [{ session: [] }], parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/ImportJob' } } } } } }
+  /api/v1/admin/imports/{id}/rows:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - { name: disposition, in: query, schema: { type: string } }
+        - { name: filter, in: query, schema: { type: string, enum: [errors, duplicates, clean] } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/ImportRow' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+  /api/v1/admin/imports/{id}/rows/{rowId}:
+    patch:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }, { name: rowId, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [disposition], properties: { disposition: { type: string, enum: [pending, accepted, rejected, merged] }, matched_company_id: { type: string } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/ImportRow' } } } } }
+  /api/v1/admin/imports/{id}/mapping:
+    post:
+      tags: [admin]
+      summary: Re-run normalisation with a new column mapping (staged jobs only)
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [column_mapping], properties: { column_mapping: { type: object, additionalProperties: { type: string } } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/ImportJob' } } } } }
+  /api/v1/admin/imports/{id}/commit:
+    post:
+      tags: [admin]
+      summary: 'Commit accepted/merged rows. With include_clean_pending, pending rows with no errors and no duplicate candidates are also created. Requires the declared source to allow internal use.'
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { dry_run: { type: boolean, default: true }, include_clean_pending: { type: boolean, default: false } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/CommitResult' } } } } }
+  /api/v1/admin/imports/{id}/rollback:
+    post: { tags: [admin], security: [{ session: [], csrf: [] }], parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/ImportJob' } } } } } }
+  /api/v1/admin/imports/{id}/report.csv:
+    get: { tags: [admin], security: [{ session: [] }], parameters: [{ $ref: '#/components/parameters/Id' }], responses: { '200': { description: CSV validation report, content: { text/csv: {} } } } }
+
+  /api/v1/admin/duplicates:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters: [{ name: status, in: query, schema: { type: string, default: open } }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/DuplicatePair' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+  /api/v1/admin/duplicates/scan:
+    post: { tags: [admin], security: [{ session: [], csrf: [] }], responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { created: { type: integer } } } } } } } }
+  /api/v1/admin/duplicates/{id}/resolve:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [action], properties: { action: { type: string, enum: [merge, dismiss] }, keep: { type: string, enum: [a, b], default: a }, notes: { type: string } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/DuplicatePair' } } } } }
+
+  /api/v1/admin/categories:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: 'All categories incl. inactive', content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Category' } } } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, slug], properties: { parent_id: { type: string }, name: { type: string }, slug: { type: string }, category_type: { type: string }, description: { type: string }, sort_order: { type: integer } } } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Category' } } } } }
+  /api/v1/admin/categories/{id}:
+    patch:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { parent_id: { type: string }, name: { type: string }, description: { type: string }, active: { type: boolean }, sort_order: { type: integer } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/Category' } } } } }
+  /api/v1/admin/sources:
+    get: { tags: [admin], security: [{ session: [] }], parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }], responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/DataSource' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DataSourceInput' } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/DataSource' } } } } }
+  /api/v1/admin/sources/{id}:
+    patch:
+      tags: [admin]
+      summary: 'Owner only for permission flags. Revoking public display unpublishes affected companies.'
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DataSourceInput' } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/DataSource' } } } } }
+  /api/v1/admin/audit-logs:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters: [{ name: entity_type, in: query, schema: { type: string } }, { name: entity_id, in: query, schema: { type: string } }, { name: action, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/AuditLog' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+  /api/v1/admin/exports:
+    post:
+      tags: [admin]
+      summary: Permission-filtered CSV export (audit-logged). commercial scope is owner-only.
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [scope], properties: { scope: { type: string, enum: [internal, public, commercial] }, publication_status: { type: string } } } } } }
+      responses: { '200': { description: CSV, content: { text/csv: {} } } }
+  /api/v1/admin/privacy-requests:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters: [{ name: status, in: query, schema: { type: string } }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/PrivacyRequestRecord' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } }
+  /api/v1/admin/privacy-requests/{id}/resolve:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [in_progress, resolved, rejected] }
+                company_id: { type: string, description: Link the request to a company. }
+                action: { type: string, enum: [none, unpublish, withdraw_public, withdraw_commercial, erase_company] }
+                resolution_notes: { type: string }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/PrivacyRequestRecord' } } } } }
+  /api/v1/admin/users:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: 'owner only', content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/AdminUser' } } } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email, password, role], properties: { email: { type: string }, display_name: { type: string }, password: { type: string, minLength: 12 }, role: { type: string, enum: [admin, reviewer] } } } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminUser' } } } } }
+  /api/v1/admin/discovery/status:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { enabled: { type: boolean }, provider: { type: string }, reason: { type: string } } } } } } } }
+  /api/v1/admin/discovery/search:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [query], properties: { query: { type: string }, location: { type: string } } } } } }
+      responses:
+        '200': { description: ok, content: { application/json: { schema: { type: object, properties: { results: { type: array, items: { $ref: '#/components/schemas/DiscoveryResult' } }, attribution: { type: string }, notice: { type: string } } } } } }
+        '503': { description: 'Discovery disabled', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/admin/discovery/leads:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: ok, content: { application/json: { schema: { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/DiscoveryLead' } }, page: { $ref: '#/components/schemas/PageInfo' } } } } } } } }
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [provider_place_id], properties: { provider_place_id: { type: string }, search_query: { type: string }, notes: { type: string } } } } } }
+      responses: { '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryLead' } } } } }
+  /api/v1/admin/discovery/leads/{id}:
+    patch:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { status: { type: string }, notes: { type: string } } } } } }
+      responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryLead' } } } } }
