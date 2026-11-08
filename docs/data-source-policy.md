@@ -53,9 +53,19 @@ How the adapter is constrained (`internal/discovery/google.go`):
 
 Intended workflow: search → recognise a business → save its place ID as a lead → contact the business personally → it registers itself (`self_submission`). The directory record then comes from the business, not from Google.
 
-## Discovery job list
+## Discovery job queue
 
-`scripts/jobs/jobs.csv` lists 14,419 sector × location searches across all 36 states/UTs. Use it only with sources whose terms permit the use. Examples: OpenStreetMap via Overpass (ODbL: attribution and share-alike apply; respect the Overpass usage policy) or Places ID-only lookups saved as leads. Record the source and licence for anything ingested.
+`scripts/jobs/jobs.csv` lists 14,419 sector × location searches across all 36 states/UTs. Upload it in Admin → Discovery jobs. Workers (the Cloudflare cron, or any process holding `WORKER_TOKEN`) claim and run them.
+
+| Provider | What is stored | Use |
+|---|---|---|
+| `osm_overpass` | OSM element ref (`node/123`), name, coordinates, allowlisted business tags (no phone/email) | Leads. Promotion creates a **private draft** with an internal-only `openstreetmap` source (`licensed_feed`, ODbL-1.0). Review ODbL attribution and share-alike obligations before enabling public display or commercial use for those fields. |
+| `google_places_ids` | **Place ID only.** The API discards any name/coordinates a worker sends, and a DB constraint rejects them. | Leads for one-to-one outreach; cannot be promoted. The runner requests field mask `places.id` only. |
+
+Rules:
+- Results are never published or exported automatically. They become directory data only through promotion (private draft) or the business's own registration.
+- Respect each provider's usage policy. Overpass: identify the client (the runner sends a User-Agent with your site URL), keep concurrency low (jobs run sequentially, 4 per 5 minutes by default) and back off on errors (built in).
+- Do not point the worker API at tools or sources whose terms prohibit the collection (see "Prohibited collection" above).
 
 ## Commercial API eligibility
 

@@ -60,9 +60,23 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  cloudflare:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+
   docker:
     runs-on: ubuntu-latest
-    needs: [go, web]
+    needs: [go, web, cloudflare]
     steps:
       - uses: actions/checkout@v4
       - name: build images

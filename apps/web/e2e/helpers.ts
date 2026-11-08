@@ -49,7 +49,8 @@ export async function submitRegistration(page: Page, opts: SubmitOptions) {
   await expect(page.getByRole("heading", { name: "Contacts" })).toBeVisible();
   await page.getByLabel(/Business email/).fill("sales@example.com");
   await page.getByLabel(/Your name/).fill("E2E Tester");
-  await page.getByLabel(/Your email/).fill("e2e-tester@example.com");
+  // Unique per run: the API caps registrations at 3 per email per day.
+  await page.getByLabel(/Your email/).fill(`e2e-tester+${Date.now().toString(36)}@example.com`);
   await page.getByRole("button", { name: "Continue" }).click();
 
   await expect(page.getByRole("heading", { name: "Permissions and review" })).toBeVisible();

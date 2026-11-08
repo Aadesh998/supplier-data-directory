@@ -7,13 +7,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE=${ENV_FILE:-infra/deploy/.env}
 COMPOSE=(docker compose -f infra/deploy/compose.prod.yaml --env-file "$ENV_FILE")
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# Read only the keys we need (the env file is not valid shell: values like MAIL_FROM contain "<").
+envval() { { grep -E "^$1=" "$ENV_FILE" || true; } | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
+POSTGRES_USER=$(envval POSTGRES_USER)
+POSTGRES_DB=$(envval POSTGRES_DB)
 
-BACKUP_DIR=${BACKUP_DIR:-/var/backups/bharatmfg}
-KEEP=${BACKUP_KEEP_DAYS:-14}
+BACKUP_DIR=$(envval BACKUP_DIR); BACKUP_DIR=${BACKUP_DIR:-/var/backups/bharatmfg}
+KEEP=$(envval BACKUP_KEEP_DAYS); KEEP=${KEEP:-14}
+BACKUP_REMOTE=$(envval BACKUP_REMOTE)
 case "$BACKUP_DIR" in
   /var/backups/*|/srv/*|/opt/*|/mnt/*|/data/*) ;;
   *) echo "refusing BACKUP_DIR=$BACKUP_DIR (expected under /var/backups, /srv, /opt, /mnt or /data)"; exit 1 ;;

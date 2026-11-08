@@ -1,6 +1,6 @@
 import "server-only";
 
-import { apiInternalUrl } from "./env";
+import { apiInternalUrl, internalApiHeaders } from "./env";
 import type {
   CategoryDetail,
   CategoryNode,
@@ -25,7 +25,7 @@ async function apiGet<T>(path: string): Promise<ApiResult<T>> {
   try {
     const res = await fetch(`${apiInternalUrl()}${path}`, {
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...internalApiHeaders() },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!res.ok) return { ok: false, status: res.status };

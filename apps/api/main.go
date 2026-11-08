@@ -4,6 +4,7 @@
 //	api migrate up|down|reset|status
 //	api seed [--demo]              load synthetic records (--demo publishes them; refused in production)
 //	api create-admin --email E --role owner|admin|reviewer   (password read from ADMIN_PASSWORD or stdin)
+//	api set-password --email E     reset an admin password (ADMIN_PASSWORD or stdin); revokes sessions
 //	api maintenance                re-verification, retention and permission-expiry jobs
 package main
 
@@ -129,6 +130,26 @@ func run(log *slog.Logger, args []string) error {
 			return err
 		}
 		fmt.Printf("created %s admin %s (%s)\n", u.Role, u.Email, u.ID)
+		return nil
+	case "set-password":
+		fsFlags := flag.NewFlagSet("set-password", flag.ContinueOnError)
+		email := fsFlags.String("email", "", "admin email")
+		if err := fsFlags.Parse(args[1:]); err != nil {
+			return err
+		}
+		password := os.Getenv("ADMIN_PASSWORD")
+		if password == "" {
+			fmt.Fprint(os.Stderr, "New password (min 12 chars): ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			password = strings.TrimSpace(line)
+		}
+		if err := store.SetPassword(ctx, pool, store.SystemActor(), *email, password); err != nil {
+			if store.IsNotFound(err) {
+				return fmt.Errorf("no admin with email %q", *email)
+			}
+			return err
+		}
+		fmt.Printf("password updated for %s; existing sessions revoked\n", *email)
 		return nil
 	case "maintenance":
 		rep, err := st.RunMaintenance(ctx)

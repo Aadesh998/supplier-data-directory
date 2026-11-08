@@ -141,3 +141,24 @@ func RevokeSession(ctx context.Context, q DBTX, id string) error {
 	_, err := q.Exec(ctx, `UPDATE admin_sessions SET revoked_at = now() WHERE id = $1`, id)
 	return err
 }
+
+// SetPassword replaces an admin's password, clears lockout and revokes their sessions.
+func SetPassword(ctx context.Context, q DBTX, a Actor, email, password string) error {
+	if len(password) < 12 {
+		return ErrInvalid{Msg: "weak password", Fields: map[string]string{"password": "must be at least 12 characters"}}
+	}
+	e, _ := normalize.Email(email)
+	hash, err := secure.HashPassword(password)
+	if err != nil {
+		return err
+	}
+	var id string
+	if err := q.QueryRow(ctx, `UPDATE admin_users SET password_hash = $2, failed_login_count = 0, locked_until = NULL
+		WHERE email = $1 RETURNING id`, e, hash).Scan(&id); err != nil {
+		return err
+	}
+	if _, err := q.Exec(ctx, `UPDATE admin_sessions SET revoked_at = now() WHERE admin_user_id = $1 AND revoked_at IS NULL`, id); err != nil {
+		return err
+	}
+	return Audit(ctx, q, a, "admin_user.set_password", "admin_user", &id, nil, nil)
+}

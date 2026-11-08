@@ -50,7 +50,10 @@ Schema source of truth: `db/migrations/`. Conventions:
 | `import_rows` | One CSV row | Keeps `raw_data` untouched plus `normalized_data`, `transformation_log`, `validation_errors`/`warnings`, `duplicate_candidates`. `disposition` is pending, accepted, rejected or merged (merged requires `matched_company_id`). |
 | `duplicate_pairs` | Candidate pairs for review | Ordered `(a < b)`, unique. Never auto-merged. Resolution recorded. |
 | `deletion_requests` | Privacy requests: correction, removal, withdraw public listing / commercial use, access, other | Requester email encrypted |
-| `discovery_leads` | Provider place IDs + our notes only | No provider content stored |
+| `discovery_leads` | Provider place IDs + our notes only (from the interactive Places lookup) | No provider content stored |
+| `discovery_job_batches` | One jobs CSV upload | Counts of inserted / updated / skipped rows, plus warnings |
+| `discovery_jobs` | One search: sector keyword × location, with `provider` (`osm_overpass` / `google_places_ids`), coordinates, radius, priority | `job_key` (CSV `job_id`) unique. Status `pending → running (leased) → done → (due again after refresh_interval_days)`, or `failed` after `max_attempts` with exponential backoff, or `paused`. A running job must have a lease. |
+| `discovery_results` | Leads found by workers, deduplicated by `(provider, provider_ref)` | **`google_places_ids` rows cannot hold name, coordinates or tags** (CHECK constraint). OSM tags are filtered to a business allowlist. Status `new / contacted / dismissed / promoted`. Promotion creates a private draft company with an internal-only OpenStreetMap source. |
 
 ## Platform
 

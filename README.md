@@ -14,7 +14,9 @@ A database of Indian manufacturers and suppliers, plus a public website and admi
 | **Admin console** | Review submissions, edit companies, verify, publish or unpublish, merge duplicates, manage taxonomy and sources, handle privacy requests, run permission-filtered exports, read the audit log. |
 | **Public site** | Industry, location and supplier pages, plus search. SEO metadata, sitemap and robots are built only from approved, permitted data. The site stays `noindex` until you switch indexing on. |
 | **Safety rails in the database** | Triggers and constraints refuse to publish without public-display permission. Personal contacts can never be public. Permissions default to `false`. The audit log is append-only. |
-| **Discovery** | A Google Places adapter that is off by default. Results are transient; only place IDs may be stored as leads. |
+| **Discovery** | A Google Places lookup that is off by default. Results are transient; only place IDs may be stored as leads. |
+| **Discovery job queue** | Upload a jobs CSV (e.g. `scripts/jobs/jobs.csv`: 14,419 sector × location searches across India) whenever you like. Workers claim jobs on a schedule (default 4 every 5 minutes) with leases, retries and backoff. Finished jobs repeat after a refresh interval, so results stay current. Executors: OpenStreetMap (Overpass) and Google Places ID-only. The database refuses to store Google content beyond place IDs. Results are leads for review; nothing is published automatically. |
+| **Deployment targets** | Docker Compose locally, a single VPS with Caddy, or **Cloudflare Workers + Containers** (API and web as containers, crons for discovery and maintenance). |
 
 ## Run it locally
 
@@ -44,6 +46,14 @@ Optional: `docker compose exec api /api seed --demo` publishes the synthetic rec
 3. Check the column mapping, review rows with errors or duplicate candidates, then **Dry run** → **Commit**.
 4. Imported companies are `approved_private`. To publish one, its data must be backed by a source that allows public display.
 
+### Running discovery jobs
+
+1. Admin → **Discovery jobs** → upload `scripts/jobs/jobs.csv`. Re-upload any time: rows match by `job_id`, and run history is kept unless you tick "reset".
+2. A worker processes the queue. On Cloudflare the built-in cron does it (see [Cloudflare runbook](docs/runbooks/cloudflare.md)). Any other process can use the worker API with `WORKER_TOKEN`: `POST /api/v1/worker/jobs/claim` → run → `…/complete` or `…/fail` (see `packages/openapi/openapi.yaml`).
+3. Review leads in Admin → **Discovery results**. Promote OpenStreetMap results to private draft companies (internal-only source; duplicates are flagged), or mark them contacted after inviting the business to register.
+
+Expect thin coverage from OpenStreetMap; it is a lead source, not a complete register. On public Overpass servers, expect slow responses. Timeouts are retried automatically.
+
 ## Developing
 
 ```bash
@@ -52,7 +62,8 @@ make run          # API on :8080 (reads .env)
 make web          # Next.js dev server on :3000 (cd apps/web && npm install first)
 make test         # Go tests (needs db-up) + web typecheck/lint/unit tests
 make test-perf    # 100,000-record performance test
-make e2e          # Playwright against a running stack (see apps/web/.env.example)
+make e2e          # Playwright against a running stack (see apps/web/.env.example). The submission rate
+                  # limit (5/hour per IP) means back-to-back runs need `docker compose restart api` in between.
 make help         # everything else
 ```
 
@@ -61,6 +72,7 @@ make help         # everything else
 | `go run ./apps/api migrate up\|down\|reset\|status` | Schema migrations (Goose, embedded in the binary) |
 | `go run ./apps/api maintenance` | Re-verification, permission-expiry and retention jobs (also runs daily inside `serve`) |
 | `go run ./apps/api create-admin --email E --role owner\|admin\|reviewer` | Create an admin user |
+| `go run ./apps/api set-password --email E` | Reset a forgotten admin password (revokes that admin's sessions). With Docker: `docker compose exec -e ADMIN_PASSWORD='…' api /api set-password --email E` |
 
 ## Repository layout
 
@@ -73,6 +85,7 @@ db/migrations/       PostgreSQL schema (Goose)
 db/seeds/            Synthetic seed data (private) + dev-only demo publish
 packages/openapi/    OpenAPI 3.1 contract
 infra/               Dockerfiles, local Postgres init, production compose + Caddy
+infra/cloudflare/    Cloudflare Worker (routing, containers, discovery + maintenance crons)
 scripts/             backup.sh / restore.sh, jobs/jobs.csv (discovery job list)
 docs/                Architecture, ERD, data dictionary, policies, ADRs, runbooks
 ```
@@ -86,7 +99,7 @@ docs/                Architecture, ERD, data dictionary, policies, ADRs, runbook
 - [Privacy and security](docs/privacy-and-security.md): threat model, controls, retention schedule
 - [API examples](docs/api-examples.md): curl walkthrough
 - [Supplier-facing copy](docs/supplier-copy.md): registration text and email templates
-- [Deployment](docs/runbooks/deployment.md), [operations](docs/runbooks/operations.md), [launch checklist](docs/launch-checklist.md)
+- [Deployment on a VPS](docs/runbooks/deployment.md), [deployment on Cloudflare](docs/runbooks/cloudflare.md), [operations](docs/runbooks/operations.md), [launch checklist](docs/launch-checklist.md)
 - [Architecture decision records](docs/adr/)
 
 ## Testing at a glance

@@ -33,6 +33,13 @@ type Config struct {
 	MailFrom     string
 	AdminNotify  string
 
+	// InternalAPIToken lets the web server's own server-side requests bypass per-IP public rate limits
+	// (they all come from one container IP). Never sent by browsers.
+	InternalAPIToken string
+
+	// WorkerToken authenticates discovery job workers (Bearer). Empty disables worker endpoints.
+	WorkerToken string
+
 	GooglePlacesEnabled  bool
 	GooglePlacesAPIKey   string
 	GooglePlacesDailyCap int
@@ -62,6 +69,8 @@ func Load() (Config, error) {
 		SMTPPassword:         os.Getenv("SMTP_PASSWORD"),
 		MailFrom:             get("MAIL_FROM", "Bharat Manufacturing Directory <no-reply@localhost>"),
 		AdminNotify:          os.Getenv("ADMIN_NOTIFY_EMAIL"),
+		WorkerToken:          os.Getenv("WORKER_TOKEN"),
+		InternalAPIToken:     os.Getenv("INTERNAL_API_TOKEN"),
 		GooglePlacesEnabled:  getBool("GOOGLE_PLACES_ENABLED", false),
 		GooglePlacesAPIKey:   os.Getenv("GOOGLE_PLACES_API_KEY"),
 		GooglePlacesDailyCap: getInt("GOOGLE_PLACES_DAILY_CAP", 100),
@@ -79,6 +88,12 @@ func Load() (Config, error) {
 			// Fixed development key so local data stays decryptable across restarts. Never used in production.
 			c.DataEncryptionKey = "ZGV2ZWxvcG1lbnQta2V5LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbiE="
 		}
+	}
+	if c.WorkerToken != "" && len(c.WorkerToken) < 32 {
+		errs = append(errs, errors.New("WORKER_TOKEN must be at least 32 characters (openssl rand -hex 32)"))
+	}
+	if c.InternalAPIToken != "" && len(c.InternalAPIToken) < 32 {
+		errs = append(errs, errors.New("INTERNAL_API_TOKEN must be at least 32 characters (openssl rand -hex 32)"))
 	}
 	if c.IsProduction() && !c.CookieSecure {
 		errs = append(errs, errors.New("COOKIE_SECURE must be true in production"))

@@ -66,7 +66,7 @@ func (s *Server) Routes() http.Handler {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
-			r.Use(httpx.Limit(s.publicLimiter, s.Cfg.TrustProxyHeaders))
+			r.Use(s.publicLimit)
 			r.Method(http.MethodGet, "/categories", h(s.listCategories))
 			r.Method(http.MethodGet, "/categories/tree", h(s.categoryTree))
 			r.Method(http.MethodGet, "/categories/{slug}", h(s.getCategory))
@@ -84,6 +84,14 @@ func (s *Server) Routes() http.Handler {
 				_, _ = w.Write(openapi.Spec)
 			})
 		}
+
+		r.Route("/worker", func(r chi.Router) {
+			r.Use(s.requireWorker)
+			r.Method(http.MethodPost, "/jobs/claim", h(s.claimJobs))
+			r.Method(http.MethodPost, "/jobs/{id}/complete", h(s.completeJob))
+			r.Method(http.MethodPost, "/jobs/{id}/fail", h(s.failJob))
+			r.Method(http.MethodPost, "/maintenance", h(s.workerMaintenance))
+		})
 
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(httpx.Limit(s.adminLimiter, s.Cfg.TrustProxyHeaders))
@@ -145,6 +153,14 @@ func (s *Server) Routes() http.Handler {
 				r.Method(http.MethodGet, "/discovery/leads", h(s.listLeads))
 				r.Method(http.MethodPost, "/discovery/leads", s.role(h(s.saveLead), "owner", "admin"))
 				r.Method(http.MethodPatch, "/discovery/leads/{id}", s.role(h(s.updateLead), "owner", "admin"))
+
+				r.Method(http.MethodGet, "/discovery/jobs", h(s.listJobs))
+				r.Method(http.MethodGet, "/discovery/jobs/stats", h(s.jobStats))
+				r.Method(http.MethodPost, "/discovery/jobs/upload", s.role(h(s.uploadJobs), "owner", "admin"))
+				r.Method(http.MethodPost, "/discovery/jobs/actions", s.role(h(s.jobAction), "owner", "admin"))
+				r.Method(http.MethodGet, "/discovery/results", h(s.listResults))
+				r.Method(http.MethodPatch, "/discovery/results/{id}", h(s.updateResult))
+				r.Method(http.MethodPost, "/discovery/results/{id}/promote", s.role(h(s.promoteResult), "owner", "admin"))
 			})
 		})
 	})
@@ -153,6 +169,25 @@ func (s *Server) Routes() http.Handler {
 		httpx.WriteError(w, r, httpx.E(http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed"))
 	})
 	return r
+}
+
+// publicLimit applies the per-IP public limit, except for the web server's own server-side
+// requests authenticated with INTERNAL_API_TOKEN (they would otherwise share one IP bucket).
+func (s *Server) publicLimit(next http.Handler) http.Handler {
+	limited := httpx.Limit(s.publicLimiter, s.Cfg.TrustProxyHeaders)(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.isInternal(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) isInternal(r *http.Request) bool {
+	tok := r.Header.Get("X-Internal-Token")
+	return s.Cfg.InternalAPIToken != "" && tok != "" &&
+		subtle.ConstantTimeCompare([]byte(tok), []byte(s.Cfg.InternalAPIToken)) == 1
 }
 
 func (s *Server) readyz(w http.ResponseWriter, r *http.Request) error {

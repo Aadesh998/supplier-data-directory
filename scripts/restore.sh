@@ -8,10 +8,10 @@ cd "$(dirname "$0")/.."
 FILE=${1:?usage: restore.sh <dump-file> [--live]}
 ENV_FILE=${ENV_FILE:-infra/deploy/.env}
 COMPOSE=(docker compose -f infra/deploy/compose.prod.yaml --env-file "$ENV_FILE")
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# Read only the keys we need (the env file is not valid shell: values like MAIL_FROM contain "<").
+envval() { { grep -E "^$1=" "$ENV_FILE" || true; } | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'; }
+POSTGRES_USER=$(envval POSTGRES_USER)
+POSTGRES_DB=$(envval POSTGRES_DB)
 
 if [[ "${2:-}" == "--live" ]]; then
   read -r -p "This REPLACES the live database '$POSTGRES_DB'. Type its name to continue: " ok

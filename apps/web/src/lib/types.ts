@@ -477,3 +477,68 @@ export type DiscoveryLead = {
   notes: string | null;
   created_at: string;
 };
+
+// --- Discovery job queue ---
+export type DiscoveryProvider = "osm_overpass" | "google_places_ids";
+
+export type DiscoveryJob = {
+  id: string;
+  job_key: string;
+  provider: DiscoveryProvider;
+  priority: number;
+  sector_family: string | null;
+  category_slug: string | null;
+  keyword: string;
+  search_query: string;
+  location: string;
+  state_code: string | null;
+  radius_km: number;
+  is_cluster: boolean;
+  status: "pending" | "running" | "done" | "failed" | "paused";
+  attempts: number;
+  max_attempts: number;
+  refresh_interval_days: number;
+  locked_by: string | null;
+  last_run_at: string | null;
+  next_run_after: string | null;
+  last_error: string | null;
+  results_count: number | null;
+  total_results: number;
+};
+
+export type JobBatch = {
+  id: string;
+  filename: string;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+  created_at: string;
+};
+
+export type JobStats = {
+  by_status: Record<string, number>;
+  due_now: number;
+  results_by_status: Record<string, number>;
+  last_batch: JobBatch | null;
+  last_run_at: string | null;
+  total_results: number;
+};
+
+export type DiscoveryJobResult = {
+  id: string;
+  provider: DiscoveryProvider;
+  provider_ref: string;
+  category_slug: string | null;
+  name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  tags: Record<string, string>;
+  status: "new" | "promoted" | "contacted" | "dismissed";
+  matched_company_id: string | null;
+  seen_count: number;
+  job_location: string | null;
+  job_state_code: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+};

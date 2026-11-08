@@ -40,7 +40,8 @@ func newEnv(t *testing.T) *env {
 	}
 	st := store.New(pool, box)
 	cfg := config.Config{Env: "test", PublicSiteURL: "http://site.test", CORSAllowedOrigins: []string{"http://site.test"},
-		SessionTTL: time.Hour, PrivacyNoticeVersion: "2026-11-v1", ReverifyInterval: 365 * 24 * time.Hour, MaxUploadBytes: 10 << 20}
+		SessionTTL: time.Hour, PrivacyNoticeVersion: "2026-11-v1", ReverifyInterval: 365 * 24 * time.Hour, MaxUploadBytes: 10 << 20,
+		WorkerToken: testWorkerToken, InternalAPIToken: testInternalToken}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(api.NewServer(cfg, st, log, notify.LogMailer{Log: log}, nil).Routes())
 	t.Cleanup(srv.Close)

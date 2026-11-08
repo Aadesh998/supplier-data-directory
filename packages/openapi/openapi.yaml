@@ -21,6 +21,8 @@ tags:
   - name: public
   - name: admin-auth
   - name: admin
+  - name: worker
+    description: Machine-to-machine endpoints for discovery job workers (Bearer WORKER_TOKEN).
 
 components:
   securitySchemes:
@@ -928,3 +930,124 @@ paths:
       parameters: [{ $ref: '#/components/parameters/Id' }]
       requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { status: { type: string }, notes: { type: string } } } } } }
       responses: { '200': { description: ok, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryLead' } } } } }
+
+  # --- Discovery job queue (admin) ---
+  /api/v1/admin/discovery/jobs:
+    get:
+      tags: [admin]
+      summary: List discovery jobs
+      security: [{ session: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, running, done, failed, paused] } }
+        - { name: provider, in: query, schema: { type: string, enum: [osm_overpass, google_places_ids] } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: priority, in: query, schema: { type: integer } }
+        - { name: q, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { description: ok } }
+  /api/v1/admin/discovery/jobs/stats:
+    get: { tags: [admin], security: [{ session: [] }], responses: { '200': { description: 'by_status, due_now, results_by_status, last_batch, last_run_at, total_results' } } }
+  /api/v1/admin/discovery/jobs/upload:
+    post:
+      tags: [admin]
+      summary: 'Upload a jobs CSV. Rows upsert by job_id; run state is kept unless reset_state=true.'
+      security: [{ session: [], csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'Required columns: job_id, keyword, search_query, location, latitude, longitude, radius_km. Optional: provider, priority, sector_family, category_slug, state_code, osm_name_regex, location_tier, is_cluster, refresh_interval_days. Max 50,000 rows.' }
+                reset_state: { type: string, enum: ['true', 'false'] }
+      responses: { '201': { description: '{id, filename, inserted, updated, skipped, errors[]}' } }
+  /api/v1/admin/discovery/jobs/actions:
+    post:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [pause, resume, retry_failed, run_now] }
+                status: { type: string, description: Restrict to jobs with this status }
+                job_ids: { type: array, items: { type: string, format: uuid }, maxItems: 1000 }
+      responses: { '200': { description: '{affected}' } }
+  /api/v1/admin/discovery/results:
+    get:
+      tags: [admin]
+      security: [{ session: [] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [new, promoted, contacted, dismissed] } }
+        - { name: provider, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { description: ok } }
+  /api/v1/admin/discovery/results/{id}:
+    patch:
+      tags: [admin]
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [new, contacted, dismissed] } } } } } }
+      responses: { '200': { description: ok } }
+  /api/v1/admin/discovery/results/{id}/promote:
+    post:
+      tags: [admin]
+      summary: 'Create a private draft company from a named OpenStreetMap result (internal-only source). Google results cannot be promoted.'
+      security: [{ session: [], csrf: [] }]
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: '{company_id}' }, '409': { $ref: '#/components/responses/Error' } }
+
+  # --- Worker API (Authorization: Bearer WORKER_TOKEN) ---
+  /api/v1/worker/jobs/claim:
+    post:
+      tags: [worker]
+      summary: 'Lease up to `limit` due jobs (default 4, max 20) for 10 minutes. Safe for concurrent workers.'
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [worker_id], properties: { worker_id: { type: string }, limit: { type: integer }, providers: { type: array, items: { type: string, enum: [osm_overpass, google_places_ids] } } } } } } }
+      responses: { '200': { description: '{jobs[], lease_seconds}' }, '401': { $ref: '#/components/responses/Error' }, '503': { description: WORKER_TOKEN not configured } }
+  /api/v1/worker/jobs/{id}/complete:
+    post:
+      tags: [worker]
+      summary: 'Report results; the job is scheduled again after refresh_interval_days. For google_places_ids only provider_ref is kept.'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id, results]
+              properties:
+                worker_id: { type: string }
+                results:
+                  type: array
+                  maxItems: 2000
+                  items:
+                    type: object
+                    required: [provider_ref]
+                    properties:
+                      provider_ref: { type: string, description: 'OSM "node/123" | "way/123" | "relation/123", or a Google place ID' }
+                      name: { type: string }
+                      latitude: { type: number }
+                      longitude: { type: number }
+                      tags: { type: object, additionalProperties: { type: string }, description: 'OSM tags; only an allowlist of business tags is stored' }
+      responses: { '200': { description: '{received, new}' }, '409': { description: Lease lost } }
+  /api/v1/worker/jobs/{id}/fail:
+    post:
+      tags: [worker]
+      summary: 'Record a failure; retried with exponential backoff, marked failed after max_attempts.'
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [worker_id, error], properties: { worker_id: { type: string }, error: { type: string } } } } } }
+      responses: { '200': { description: updated job } }
+  /api/v1/worker/maintenance:
+    post: { tags: [worker], summary: Run maintenance jobs (used by the Cloudflare daily cron), responses: { '200': { description: report } } }

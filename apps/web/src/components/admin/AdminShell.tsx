@@ -16,7 +16,9 @@ const NAV = [
   { href: "/admin/sources", label: "Data sources" },
   { href: "/admin/privacy-requests", label: "Privacy requests" },
   { href: "/admin/audit", label: "Audit log" },
-  { href: "/admin/discovery", label: "Discovery" },
+  { href: "/admin/discovery/jobs", label: "Discovery jobs" },
+  { href: "/admin/discovery/results", label: "Discovery results" },
+  { href: "/admin/discovery", label: "Places lookup" },
   { href: "/admin/exports", label: "Exports" },
 ];
 
@@ -30,7 +32,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const isActive = (href: string) => (href === "/admin" ? pathname === "/admin" : pathname?.startsWith(href));
+  const isActive = (href: string) =>
+    href === "/admin" || href === "/admin/discovery" ? pathname === href : pathname?.startsWith(href);
 
   return (
     <div className="min-h-screen bg-slate-100">

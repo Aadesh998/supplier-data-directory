@@ -1,0 +1,272 @@
+package api_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
+
+const testWorkerToken = "test-worker-token-0123456789abcdef0123456789"
+
+const jobsCSV = `job_id,priority,sector_family,category_slug,keyword,search_query,osm_name_regex,location,state_code,state_name,latitude,longitude,radius_km,location_tier,is_cluster,status
+j-morbi-tiles,1,Building materials,vitrified-tiles,vitrified tiles,"vitrified tiles manufacturer in Morbi, Gujarat",vitrified|granito,Morbi,GJ,Gujarat,22.8173,70.8377,15,1,true,pending
+j-pune-cnc,2,Metals and engineering,cnc-machined-components,CNC machining,"CNC machining job shop in Pune, Maharashtra",cnc|machining,Pune,MH,Maharashtra,18.5204,73.8567,25,1,false,pending
+j-bad,2,X,nope-slug,kw,q,,Nowhere,ZZ,,999,0,5,3,false,pending
+`
+
+type worker struct {
+	c  *client
+	id string
+}
+
+func (e *env) worker(id string) worker {
+	c := e.anon()
+	return worker{c: c, id: id}
+}
+
+func (w worker) call(path string, body any, want int, out any) []byte {
+	return w.c.must("POST", path, body, want, out, "Authorization", "Bearer "+testWorkerToken)
+}
+
+type claimed struct {
+	Jobs []struct {
+		ID           string  `json:"id"`
+		JobKey       string  `json:"job_key"`
+		Provider     string  `json:"provider"`
+		OSMNameRegex *string `json:"osm_name_regex"`
+		Attempts     int     `json:"attempts"`
+	} `json:"jobs"`
+}
+
+func TestDiscoveryJobQueue(t *testing.T) {
+	e := newEnv(t)
+	admin := e.login("admin")
+	var batch struct {
+		Inserted, Updated, Skipped int
+		Errors                     []string
+	}
+	admin.must("POST", "/api/v1/admin/discovery/jobs/upload", csvUpload("jobs.csv", jobsCSV, nil), 201, &batch)
+	if batch.Inserted != 2 || batch.Skipped != 1 || len(batch.Errors) != 1 {
+		t.Fatalf("upload = %+v", batch)
+	}
+
+	// Worker endpoints require the token.
+	anon := e.anon()
+	if code, _, _ := anon.do("POST", "/api/v1/worker/jobs/claim", map[string]any{"worker_id": "x"}); code != 401 {
+		t.Fatalf("claim without token = %d", code)
+	}
+
+	w1, w2 := e.worker("cf-1"), e.worker("cf-2")
+	var c1, c2 claimed
+	w1.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w1.id, "limit": 1}, 200, &c1)
+	w2.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w2.id, "limit": 4}, 200, &c2)
+	if len(c1.Jobs) != 1 || c1.Jobs[0].JobKey != "j-morbi-tiles" || len(c2.Jobs) != 1 || c2.Jobs[0].JobKey != "j-pune-cnc" {
+		t.Fatalf("claims must be disjoint and priority-ordered: %+v / %+v", c1, c2)
+	}
+	var none claimed
+	w1.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w1.id}, 200, &none)
+	if len(none.Jobs) != 0 {
+		t.Fatal("nothing should be due while jobs are leased")
+	}
+
+	// Wrong worker cannot complete someone else's job.
+	w2.call("/api/v1/worker/jobs/"+c1.Jobs[0].ID+"/complete", map[string]any{"worker_id": w2.id, "results": []any{}}, 409, nil)
+
+	lat, lng := 22.81, 70.83
+	var done struct{ Received, New int }
+	w1.call("/api/v1/worker/jobs/"+c1.Jobs[0].ID+"/complete", map[string]any{"worker_id": w1.id, "results": []map[string]any{
+		{"provider_ref": "way/1001", "name": "Sample Vitrified Pvt Ltd", "latitude": lat, "longitude": lng,
+			"tags": map[string]string{"man_made": "works", "addr:city": "Morbi", "phone": "+91 99999 00000", "website": "https://sample.example"}},
+		{"provider_ref": "node/2002", "name": "Another Ceramic Works"},
+	}}, 200, &done)
+	if done.Received != 2 || done.New != 2 {
+		t.Fatalf("complete = %+v", done)
+	}
+	var phoneKept int
+	_ = e.st.Pool.QueryRow(context.Background(), `SELECT count(*) FROM discovery_results WHERE tags ? 'phone'`).Scan(&phoneKept)
+	if phoneKept != 0 {
+		t.Fatal("non-allowlisted tags (phone) must be dropped")
+	}
+	var next time.Time
+	_ = e.st.Pool.QueryRow(context.Background(), `SELECT next_run_after FROM discovery_jobs WHERE job_key = 'j-morbi-tiles'`).Scan(&next)
+	if time.Until(next) < 29*24*time.Hour {
+		t.Fatalf("completed job should refresh in ~30 days, next=%v", next)
+	}
+	// Seen again on a later run: deduplicated.
+	if _, err := e.st.Pool.Exec(context.Background(), `UPDATE discovery_jobs SET next_run_after = now() - interval '1 minute' WHERE job_key = 'j-morbi-tiles'`); err != nil {
+		t.Fatal(err)
+	}
+	var again claimed
+	w1.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w1.id}, 200, &again)
+	if len(again.Jobs) != 1 {
+		t.Fatalf("due refresh job not reclaimed: %+v", again)
+	}
+	w1.call("/api/v1/worker/jobs/"+again.Jobs[0].ID+"/complete", map[string]any{"worker_id": w1.id, "results": []map[string]any{
+		{"provider_ref": "way/1001", "name": "Sample Vitrified Pvt Ltd"}}}, 200, &done)
+	if done.New != 0 {
+		t.Fatal("re-seen result must not be counted as new")
+	}
+
+	// Failures back off, then fail after max_attempts; retry_failed requeues.
+	job := c2.Jobs[0].ID
+	for i := 0; i < 3; i++ {
+		if i > 0 {
+			_, _ = e.st.Pool.Exec(context.Background(), `UPDATE discovery_jobs SET next_run_after = now() - interval '1 minute' WHERE id = $1`, job)
+			var c claimed
+			w2.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w2.id}, 200, &c)
+			if len(c.Jobs) != 1 {
+				t.Fatalf("attempt %d: job not reclaimed", i+1)
+			}
+		}
+		var j struct{ Status string }
+		w2.call("/api/v1/worker/jobs/"+job+"/fail", map[string]any{"worker_id": w2.id, "error": "overpass 429"}, 200, &j)
+		want := "pending"
+		if i == 2 {
+			want = "failed"
+		}
+		if j.Status != want {
+			t.Fatalf("after failure %d status = %s, want %s", i+1, j.Status, want)
+		}
+	}
+	var affected struct{ Affected int }
+	admin.must("POST", "/api/v1/admin/discovery/jobs/actions", map[string]any{"action": "retry_failed"}, 200, &affected)
+	if affected.Affected != 1 {
+		t.Fatalf("retry_failed affected %d", affected.Affected)
+	}
+
+	// Expired leases are reclaimable by another worker.
+	var c3 claimed
+	w1.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w1.id}, 200, &c3)
+	_, _ = e.st.Pool.Exec(context.Background(), `UPDATE discovery_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = $1`, c3.Jobs[0].ID)
+	var c4 claimed
+	w2.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w2.id}, 200, &c4)
+	if len(c4.Jobs) != 1 || c4.Jobs[0].ID != c3.Jobs[0].ID {
+		t.Fatal("expired lease should be reclaimable")
+	}
+
+	// Re-upload keeps run state; reset_state requeues.
+	admin.must("POST", "/api/v1/admin/discovery/jobs/upload", csvUpload("jobs.csv", jobsCSV, nil), 201, &batch)
+	if batch.Updated != 2 || batch.Inserted != 0 {
+		t.Fatalf("re-upload = %+v", batch)
+	}
+	var status string
+	_ = e.st.Pool.QueryRow(context.Background(), `SELECT status FROM discovery_jobs WHERE job_key = 'j-morbi-tiles'`).Scan(&status)
+	if status != "done" {
+		t.Fatalf("re-upload without reset must keep state, got %s", status)
+	}
+	admin.must("POST", "/api/v1/admin/discovery/jobs/upload", csvUpload("jobs.csv", jobsCSV, map[string]string{"reset_state": "true"}), 201, &batch)
+	_ = e.st.Pool.QueryRow(context.Background(), `SELECT status FROM discovery_jobs WHERE job_key = 'j-morbi-tiles'`).Scan(&status)
+	if status != "pending" {
+		t.Fatalf("reset_state should requeue, got %s", status)
+	}
+
+	var stats struct {
+		ByStatus     map[string]int `json:"by_status"`
+		TotalResults int            `json:"total_results"`
+	}
+	admin.must("GET", "/api/v1/admin/discovery/jobs/stats", nil, 200, &stats)
+	if stats.TotalResults != 2 {
+		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestDiscoveryResultsPromotionAndGoogleBoundary(t *testing.T) {
+	e := newEnv(t)
+	admin := e.login("admin")
+	csv := jobsCSV + "j-google,1,,tiles,tiles,\"tiles in Morbi\",,Morbi,GJ,Gujarat,22.8,70.8,10,1,false,pending\n"
+	csv = strings.Replace(csv, "job_id,priority", "job_id,priority", 1)
+	// add a provider column for the google row
+	lines := strings.Split(strings.TrimSpace(csv), "\n")
+	lines[0] += ",provider"
+	for i := 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "j-google") {
+			lines[i] += ",google_places_ids"
+		} else {
+			lines[i] += ",osm_overpass"
+		}
+	}
+	admin.must("POST", "/api/v1/admin/discovery/jobs/upload", csvUpload("jobs.csv", strings.Join(lines, "\n")+"\n", nil), 201, nil)
+
+	w := e.worker("cf-1")
+	var c claimed
+	w.call("/api/v1/worker/jobs/claim", map[string]any{"worker_id": w.id, "limit": 5, "providers": []string{"osm_overpass", "google_places_ids"}}, 200, &c)
+	for _, j := range c.Jobs {
+		results := []map[string]any{{"provider_ref": "ref-" + j.JobKey, "name": "Morvi Vitrified Tiles", "tags": map[string]string{"addr:postcode": "363641"}}}
+		w.call("/api/v1/worker/jobs/"+j.ID+"/complete", map[string]any{"worker_id": w.id, "results": results}, 200, nil)
+	}
+	var googleNamed int
+	_ = e.st.Pool.QueryRow(context.Background(), `SELECT count(*) FROM discovery_results WHERE provider = 'google_places_ids' AND name IS NOT NULL`).Scan(&googleNamed)
+	if googleNamed != 0 {
+		t.Fatal("Google results must store the place ID only")
+	}
+	if _, err := e.st.Pool.Exec(context.Background(), `INSERT INTO discovery_results (provider, provider_ref, name) VALUES ('google_places_ids', 'x', 'Leak')`); err == nil {
+		t.Fatal("database must reject Google content")
+	}
+
+	var results struct {
+		Data []struct {
+			ID, Provider string
+		} `json:"data"`
+	}
+	admin.must("GET", "/api/v1/admin/discovery/results?limit=50", nil, 200, &results)
+	var osmID, googleID string
+	for _, r := range results.Data {
+		if r.Provider == "google_places_ids" {
+			googleID = r.ID
+		} else if osmID == "" {
+			osmID = r.ID
+		}
+	}
+	admin.must("POST", "/api/v1/admin/discovery/results/"+googleID+"/promote", nil, 409, nil)
+	var promoted struct {
+		CompanyID string `json:"company_id"`
+	}
+	admin.must("POST", "/api/v1/admin/discovery/results/"+osmID+"/promote", nil, 200, &promoted)
+	admin.must("POST", "/api/v1/admin/discovery/results/"+osmID+"/promote", nil, 409, nil)
+
+	var company struct {
+		PublicationStatus string `json:"publication_status"`
+		Facilities        []struct {
+			City       *string `json:"city"`
+			PostalCode *string `json:"postal_code"`
+		} `json:"facilities"`
+		PublishCheck struct{ Allowed bool } `json:"publish_check"`
+	}
+	admin.must("GET", "/api/v1/admin/companies/"+promoted.CompanyID, nil, 200, &company)
+	if company.PublicationStatus != "draft" || company.PublishCheck.Allowed || len(company.Facilities) != 1 ||
+		company.Facilities[0].PostalCode == nil || *company.Facilities[0].PostalCode != "363641" {
+		t.Fatalf("promoted company = %+v", company)
+	}
+	var dups struct{ Data []any }
+	admin.must("GET", "/api/v1/admin/duplicates", nil, 200, &dups)
+	if len(dups.Data) == 0 {
+		t.Fatal("promotion should flag the synthetic Morvi Vitrified record as a possible duplicate")
+	}
+	admin.must("PATCH", "/api/v1/admin/discovery/results/"+googleID, map[string]string{"status": "contacted"}, 200, nil)
+}
+
+const testInternalToken = "test-internal-token-0123456789abcdef01234567"
+
+func TestPublicRateLimitAndInternalBypass(t *testing.T) {
+	e := newEnv(t)
+	c := e.anon()
+	limited := false
+	for i := 0; i < 70; i++ { // burst is 60
+		if code, _, _ := c.do("GET", "/api/v1/roles", nil); code == 429 {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("anonymous public requests should hit the per-IP limit")
+	}
+	for i := 0; i < 20; i++ {
+		if code, _, _ := c.do("GET", "/api/v1/roles", nil, "X-Internal-Token", testInternalToken); code != 200 {
+			t.Fatalf("internal web-server request %d got %d", i, code)
+		}
+	}
+	if code, _, _ := c.do("GET", "/api/v1/roles", nil, "X-Internal-Token", "wrong-token-wrong-token-wrong-token"); code != 429 {
+		t.Fatalf("wrong internal token must not bypass the limit, got %d", code)
+	}
+}

@@ -13,6 +13,12 @@ export function apiInternalUrl(): string {
   return (readEnv("API_INTERNAL_URL") ?? "http://localhost:8080").replace(/\/+$/, "");
 }
 
+/** Headers for the web server's own server-side calls to the API (never sent from the browser). */
+export function internalApiHeaders(): Record<string, string> {
+  const token = readEnv("INTERNAL_API_TOKEN");
+  return token ? { "X-Internal-Token": token } : {};
+}
+
 export function siteUrl(): string {
   return (readEnv("NEXT_PUBLIC_SITE_URL") ?? "http://localhost:3000").replace(/\/+$/, "");
 }

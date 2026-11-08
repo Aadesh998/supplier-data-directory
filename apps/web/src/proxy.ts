@@ -9,6 +9,11 @@ import { NextResponse, type NextRequest } from "next/server";
 // through to the normal page render (which also handles 410 as a fallback,
 // rendering the same message with noindex).
 
+function internalHeaders(): Record<string, string> {
+  const token = (process.env as Record<string, string | undefined>)["INTERNAL_API_TOKEN"];
+  return token ? { "X-Internal-Token": token } : {};
+}
+
 function apiBase(): string {
   const env: Record<string, string | undefined> = process.env;
   return (env["API_INTERNAL_URL"] || "http://localhost:8080").replace(/\/+$/, "");
@@ -51,7 +56,7 @@ export async function proxy(request: NextRequest) {
       method: "GET",
       redirect: "manual",
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...internalHeaders() },
       signal: AbortSignal.timeout(3000),
     });
     if (res.status === 410) {
