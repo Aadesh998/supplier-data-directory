@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -50,6 +51,7 @@ type fakeScraper struct {
 	created []gmaps.JobRequest
 	deleted []string
 	csv     string
+	stuck   bool // never reports "ok", like the real scraper when it hangs
 }
 
 func (f *fakeScraper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +71,7 @@ func (f *fakeScraper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet:
 		f.checks[path]++
 		st := "working"
-		if f.checks[path] >= 2 {
+		if f.checks[path] >= 2 && !f.stuck {
 			st = "ok"
 		}
 		_, _ = w.Write([]byte(`{"ID":"x","Status":"` + st + `"}`))
@@ -173,5 +175,42 @@ func TestWorkerRecordsEmptyResultAsFailure(t *testing.T) {
 	_ = pool.QueryRow(ctx, `SELECT status, last_error, next_run_after FROM discovery_jobs WHERE job_key = 'g2'`).Scan(&status, &lastErr, &next)
 	if status != "pending" || !strings.Contains(lastErr, "empty CSV") || !next.After(time.Now()) {
 		t.Fatalf("after empty result: %s %q %v", status, lastErr, next)
+	}
+}
+
+func TestWorkerUsesResultsOfHungScraperJob(t *testing.T) {
+	pool := testutil.NewDB(t)
+	testutil.Seed(t, pool)
+	box, _ := secure.NewBox("dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=")
+	st := store.New(pool, box)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO discovery_jobs (job_key, provider, keyword, search_query, location, state_code, latitude, longitude, radius_km)
+		VALUES ('g3', 'gmaps_scraper', 'tiles', 'tiles in Morbi', 'Morbi', 'GJ', 22.8, 70.8, 15)`); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeScraper{checks: map[string]int{}, csv: resultsCSV, stuck: true}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	marker := t.TempDir() + "/restarted"
+	w := gmaps.NewWorker(gmaps.Config{APIURL: srv.URL + "/api/v1/jobs", WorkerID: "w1", Depth: 1,
+		MaxTime: 20 * time.Millisecond, Poll: 10 * time.Millisecond, RestartCmd: "touch " + marker},
+		st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	jobs, err := store.ClaimJobs(ctx, pool, "w1", 1, []string{store.ProviderGmaps})
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("claim = %v, %v", jobs, err)
+	}
+	w.RunJob(ctx, jobs[0])
+
+	var status string
+	var results int
+	_ = pool.QueryRow(ctx, `SELECT status, results_count FROM discovery_jobs WHERE job_key = 'g3'`).Scan(&status, &results)
+	if status != "done" || results != 2 {
+		t.Fatalf("hung job = %s results=%d, want done with 2 (results taken from the CSV)", status, results)
+	}
+	if len(fake.deleted) != 1 {
+		t.Fatalf("scraper job not cleaned up: %v", fake.deleted)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("restart command did not run after the hung job")
 	}
 }

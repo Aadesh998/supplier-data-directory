@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bharatmfg/directory/internal/store"
@@ -23,19 +25,28 @@ type Config struct {
 	MaxTime  time.Duration // GMAPS_MAX_TIME_SECONDS, per scraper job
 	Idle     time.Duration // GMAPS_IDLE_SECONDS, pause when no job is due
 	Poll     time.Duration // GMAPS_POLL_SECONDS, how often to check the scraper
+	// Grace is how long past MaxTime a job may stay "working" before the worker takes the results so far
+	// (GMAPS_GRACE_SECONDS). The scraper sometimes hangs after collecting results and never reports "ok".
+	Grace time.Duration
+	// RestartCmd runs after a hung job (GMAPS_RESTART_CMD, e.g. "sudo systemctl restart google-scrape").
+	// The scraper runs one job at a time and deleting a job does not stop it, so a hung job blocks the
+	// queue until the scraper restarts. Empty = don't restart.
+	RestartCmd string
 }
 
 // ConfigFromEnv reads the worker settings with sensible defaults.
 func ConfigFromEnv() Config {
 	host, _ := os.Hostname()
 	c := Config{
-		APIURL:   envStr("GMAPS_API_URL", "https://leads.peoplvance.org/api/v1/jobs"),
-		Auth:     os.Getenv("GMAPS_AUTH"),
-		WorkerID: envStr("GMAPS_WORKER_ID", "gmaps-"+host),
-		Depth:    envInt("GMAPS_DEPTH", 5),
-		Email:    os.Getenv("GMAPS_EMAIL") == "true" || os.Getenv("GMAPS_EMAIL") == "1",
-		Idle:     time.Duration(envInt("GMAPS_IDLE_SECONDS", 300)) * time.Second,
-		Poll:     time.Duration(envInt("GMAPS_POLL_SECONDS", 20)) * time.Second,
+		APIURL:     envStr("GMAPS_API_URL", "https://leads.peoplvance.org/api/v1/jobs"),
+		Auth:       os.Getenv("GMAPS_AUTH"),
+		WorkerID:   envStr("GMAPS_WORKER_ID", "gmaps-"+host),
+		Depth:      envInt("GMAPS_DEPTH", 5),
+		Email:      os.Getenv("GMAPS_EMAIL") == "true" || os.Getenv("GMAPS_EMAIL") == "1",
+		Idle:       time.Duration(envInt("GMAPS_IDLE_SECONDS", 300)) * time.Second,
+		Poll:       time.Duration(envInt("GMAPS_POLL_SECONDS", 20)) * time.Second,
+		Grace:      time.Duration(envInt("GMAPS_GRACE_SECONDS", 120)) * time.Second,
+		RestartCmd: os.Getenv("GMAPS_RESTART_CMD"),
 	}
 	defMax := 300
 	if c.Email {
@@ -146,16 +157,22 @@ func (w *Worker) scrape(ctx context.Context, j store.DiscoveryJob) ([]store.Gmap
 	if err != nil {
 		return nil, err
 	}
+	hung := false
 	defer func() { // clean up the scraper server's disk whatever happens
 		bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := w.Client.Delete(bg, id); err != nil {
 			w.Log.Warn("could not delete scraper job", "scraper_job", id, "err", err)
 		}
+		if hung {
+			w.restartScraper()
+		}
 	}()
 
 	// The scraper runs jobs one at a time, so allow queue time on top of the job's own max time.
 	deadline := time.Now().Add(w.Cfg.MaxTime + 30*time.Minute)
+	var workingSince time.Time
+	lastSize := -1
 	for {
 		if !sleep(ctx, w.Cfg.Poll) {
 			return nil, ctx.Err()
@@ -182,11 +199,48 @@ func (w *Worker) scrape(ctx context.Context, j store.DiscoveryJob) ([]store.Gmap
 			return ParseCSV(data)
 		case "failed":
 			return nil, errors.New("scraper job failed")
+		case "working":
+			if workingSince.IsZero() {
+				workingSince = time.Now()
+			}
+			// Past its own time limit the scraper should have stopped. If it is still "working", it has
+			// hung after writing results: take the CSV once it has stopped growing.
+			if time.Since(workingSince) > w.Cfg.MaxTime+w.Cfg.Grace {
+				hung = true
+				data, err := w.Client.Download(ctx, id)
+				if err == nil && len(data) > 0 && len(data) == lastSize {
+					w.Log.Warn("scraper job overran its time limit; using the results it wrote", "scraper_job", id,
+						"bytes", len(data))
+					return ParseCSV(data)
+				}
+				if err == nil {
+					lastSize = len(data)
+				}
+			}
 		}
 		if time.Now().After(deadline) {
+			hung = hung || status == "working"
 			return nil, fmt.Errorf("scraper job still %q after %s", status, w.Cfg.MaxTime+30*time.Minute)
 		}
 	}
+}
+
+// restartScraper runs Cfg.RestartCmd so a hung scraper stops blocking its queue.
+func (w *Worker) restartScraper() {
+	if w.Cfg.RestartCmd == "" {
+		w.Log.Warn("scraper looks hung; set GMAPS_RESTART_CMD so the worker can restart it")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	args := strings.Fields(w.Cfg.RestartCmd)
+	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	if err != nil {
+		w.Log.Error("scraper restart failed", "cmd", w.Cfg.RestartCmd, "err", err, "output", strings.TrimSpace(string(out)))
+		return
+	}
+	w.Log.Info("restarted the scraper after a hung job", "cmd", w.Cfg.RestartCmd)
+	sleep(ctx, 10*time.Second) // let it come back up before the next job
 }
 
 // sleep waits d or until ctx is done; it reports whether the full wait happened.

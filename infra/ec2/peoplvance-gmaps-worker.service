@@ -13,7 +13,9 @@ WorkingDirectory=/home/ubuntu/peoplvance
 EnvironmentFile=/home/ubuntu/peoplvance/.env
 # The scraper runs on this box (google-scrape.service), so talk to it directly.
 # Set via env(1), not Environment=, because values in EnvironmentFile would override Environment=.
-ExecStart=/usr/bin/env GMAPS_API_URL=http://127.0.0.1:8080/api/v1/jobs /home/ubuntu/peoplvance/peoplvance-api gmaps-worker
+# The scraper sometimes hangs after writing results and then blocks its one-at-a-time queue;
+# the worker takes the results and restarts it (ubuntu has passwordless sudo on this box).
+ExecStart=/usr/bin/env GMAPS_API_URL=http://127.0.0.1:8080/api/v1/jobs "GMAPS_RESTART_CMD=sudo systemctl restart google-scrape" /home/ubuntu/peoplvance/peoplvance-api gmaps-worker
 Restart=always
 RestartSec=10
 KillSignal=SIGTERM
