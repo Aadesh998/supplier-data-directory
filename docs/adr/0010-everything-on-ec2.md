@@ -3,7 +3,7 @@
 **Status:** accepted · 2026-11-09 · supersedes [ADR 0009](0009-cloudflare-containers.md)
 
 ## Context
-The Google Maps worker must run for hours next to the scraper, and Cloudflare Containers sleep after 15 minutes. The scraper already runs on an EC2 box (the santimentos dev server, `leads.peoplvance.org`). Splitting the website onto Cloudflare added a second platform, a second deploy path and IP-forwarding rules, without a real need at current traffic.
+The Google Maps worker must run for hours next to the scraper, and Cloudflare Containers sleep after 15 minutes. The scraper already runs on an EC2 box (the santimentos dev server). Splitting the website onto Cloudflare added a second platform, a second deploy path and IP-forwarding rules, without a real need at current traffic.
 
 ## Decision
 - **One box, no Docker for the app.** nginx serves `peoplvance.org`: `/api/*` goes to the Go API, everything else to the Next.js website.

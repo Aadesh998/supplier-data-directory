@@ -19,7 +19,7 @@ import (
 
 // Client talks to the scraper's /api/v1/jobs endpoints.
 type Client struct {
-	BaseURL string // e.g. https://leads.peoplvance.org/api/v1/jobs
+	BaseURL string // e.g. http://127.0.0.1:8080/api/v1/jobs
 	Auth    string // optional "user:password" for basic auth
 	HTTP    *http.Client
 }

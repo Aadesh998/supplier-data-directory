@@ -75,7 +75,7 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
       PUBLIC_SITE_URL: https://${DOMAIN}
       MAIL_FROM: ${MAIL_FROM}
-      GMAPS_API_URL: ${GMAPS_API_URL:-https://leads.peoplvance.org/api/v1/jobs}
+      GMAPS_API_URL: ${GMAPS_API_URL:?GMAPS_API_URL is required}
       GMAPS_AUTH: ${GMAPS_AUTH:-}
       GMAPS_DEPTH: ${GMAPS_DEPTH:-5}
       GMAPS_EMAIL: ${GMAPS_EMAIL:-false}

@@ -345,3 +345,50 @@ func TestGmapsLeadsReviewAndPromote(t *testing.T) {
 		t.Fatalf("promoted filter = %+v", page)
 	}
 }
+
+func TestGmapsLeadsBulkPromoteAndApprove(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pool := e.st.Pool
+	if _, err := pool.Exec(ctx, `
+		WITH j AS (INSERT INTO discovery_jobs (job_key, provider, keyword, search_query, location, state_code, latitude, longitude, radius_km)
+		           VALUES ('gmb', 'gmaps_scraper', 'k', 'q', 'Morbi', 'GJ', 22.8, 70.8, 15) RETURNING id)
+		INSERT INTO gmaps_leads (place_key, first_job_id, last_job_id, state_code, location, title, phone, status)
+		SELECT 'b' || g, j.id, j.id, CASE WHEN g <= 4 THEN 'GJ' ELSE 'MH' END, 'Morbi', 'Bulk Lead ' || g,
+		       CASE WHEN g <> 2 THEN '+91 98250 1000' || g END, CASE WHEN g = 3 THEN 'dismissed' ELSE 'new' END
+		FROM j, generate_series(1, 6) g`); err != nil {
+		t.Fatal(err)
+	}
+	e.login("reviewer").must("POST", "/api/v1/admin/gmaps/leads/promote", map[string]any{}, 403, nil)
+	admin := e.login("admin")
+
+	// Gujarat + has phone: leads 1 and 4 (2 has no phone, 3 is dismissed, 5-6 are MH).
+	var res struct {
+		Promoted, Failed, Remaining int
+	}
+	admin.must("POST", "/api/v1/admin/gmaps/leads/promote", map[string]any{"state": "GJ", "has_phone": true}, 200, &res)
+	if res.Promoted != 2 || res.Failed != 0 || res.Remaining != 0 {
+		t.Fatalf("bulk promote = %+v, want 2 promoted, 0 remaining", res)
+	}
+	admin.must("POST", "/api/v1/admin/gmaps/leads/promote", map[string]any{"state": "GJ", "has_phone": true}, 200, &res)
+	if res.Promoted != 0 {
+		t.Fatalf("second run promoted again: %+v", res)
+	}
+
+	var approved struct{ Approved int }
+	admin.must("POST", "/api/v1/admin/gmaps/leads/approve-promoted", nil, 200, &approved)
+	if approved.Approved != 2 {
+		t.Fatalf("approved = %d, want 2", approved.Approved)
+	}
+	var drafts, approvedPrivate, dismissedStill int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE c.publication_status = 'draft'), count(*) FILTER (WHERE c.publication_status = 'approved_private')
+		FROM companies c JOIN gmaps_leads l ON l.promoted_company_id = c.id`).Scan(&drafts, &approvedPrivate)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM gmaps_leads WHERE place_key = 'b3' AND status = 'dismissed'`).Scan(&dismissedStill)
+	if drafts != 0 || approvedPrivate != 2 || dismissedStill != 1 {
+		t.Fatalf("drafts=%d approved=%d dismissed=%d", drafts, approvedPrivate, dismissedStill)
+	}
+	admin.must("POST", "/api/v1/admin/gmaps/leads/approve-promoted", nil, 200, &approved)
+	if approved.Approved != 0 {
+		t.Fatalf("second approve = %d", approved.Approved)
+	}
+}

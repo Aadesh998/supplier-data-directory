@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { useApi, useAuth } from "@/components/admin/AuthProvider";
 import { AdminPagination, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
@@ -18,6 +18,124 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
+}
+
+type LeadFilters = { status: string; state: string; q: string; job: string; has_phone: boolean; has_website: boolean };
+type BatchResult = { promoted: number; failed: number; remaining: number; errors?: string[] };
+
+/** Promote every lead matching the filters (in batches, with progress) and approve the promoted drafts. */
+function BulkActions({ filters, matching, onChanged }: { filters: LeadFilters; matching: number; onChanged: () => void }) {
+  const api = useApi();
+  const toast = useToast();
+  const stopRef = useRef(false);
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{ promoted: number; failed: number; remaining: number; errors: string[] } | null>(null);
+  const promotable = filters.status === "" || filters.status === "new" || filters.status === "contacted";
+
+  async function promoteAll() {
+    setConfirming(false);
+    setRunning(true);
+    stopRef.current = false;
+    const total = { promoted: 0, failed: 0, remaining: matching, errors: [] as string[] };
+    setProgress({ ...total });
+    try {
+      while (!stopRef.current) {
+        const r = await api.post<BatchResult>("/admin/gmaps/leads/promote", { ...filters, status: filters.status || undefined });
+        total.promoted += r.promoted;
+        total.failed += r.failed;
+        total.remaining = r.remaining;
+        if (r.errors) total.errors = [...total.errors, ...r.errors].slice(0, 5);
+        setProgress({ ...total });
+        onChanged();
+        // Done, or a batch made no progress (only failing leads left): stop instead of looping forever.
+        if (r.remaining === 0 || r.promoted === 0) break;
+      }
+      toast.success(`Promoted ${total.promoted.toLocaleString("en-IN")} leads to private draft companies.`);
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const approve = useMutation({
+    mutationFn: () => api.post<{ approved: number }>("/admin/gmaps/leads/approve-promoted"),
+    onSuccess: (r) => {
+      toast.success(
+        r.approved
+          ? `Approved ${r.approved.toLocaleString("en-IN")} companies (still private). Publish them from Companies → Publish all eligible.`
+          : "No draft companies from leads to approve.",
+      );
+      onChanged();
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {running ? (
+          <button type="button" className="btn-secondary" onClick={() => (stopRef.current = true)}>
+            Stop after this batch
+          </button>
+        ) : confirming ? (
+          <>
+            <span className="text-sm">
+              Promote all {matching.toLocaleString("en-IN")} matching leads to private draft companies?
+            </span>
+            <button type="button" className="btn-primary" onClick={() => void promoteAll()}>
+              Yes, promote
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!promotable || matching === 0}
+            title={promotable ? undefined : "Promoted and dismissed leads can't be promoted"}
+            onClick={() => setConfirming(true)}
+          >
+            Promote all {matching.toLocaleString("en-IN")} matching
+          </button>
+        )}
+        <button type="button" className="btn-secondary" disabled={running || approve.isPending} onClick={() => approve.mutate()}>
+          {approve.isPending ? "Approving…" : "Approve promoted drafts"}
+        </button>
+      </div>
+      {progress && (
+        <div role="status" className="space-y-1 rounded-md border bg-muted/40 p-3 text-sm">
+          <p>
+            {running ? "Promoting… " : "Finished. "}
+            <strong>{progress.promoted.toLocaleString("en-IN")}</strong> promoted
+            {progress.failed > 0 && <>, {progress.failed} failed</>}, {progress.remaining.toLocaleString("en-IN")} still matching.
+          </p>
+          {progress.remaining + progress.promoted > 0 && (
+            <div className="h-1.5 overflow-hidden rounded bg-muted">
+              <div
+                className="h-full bg-primary transition-[width]"
+                style={{ width: `${Math.round((100 * progress.promoted) / (progress.promoted + progress.remaining))}%` }}
+              />
+            </div>
+          )}
+          {progress.errors.length > 0 && (
+            <ul className="list-disc pl-5 text-xs text-destructive">
+              {progress.errors.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Promoting creates private draft companies. Approving keeps them private; nothing is public until the Google Maps
+        source allows public display and you publish.
+      </p>
+    </div>
+  );
 }
 
 function LeadsPage() {
@@ -83,6 +201,13 @@ function LeadsPage() {
             Show all
           </Link>
         </p>
+      )}
+      {canPromote && (
+        <BulkActions
+          filters={{ status, state, q, job, has_phone: hasPhone, has_website: hasWebsite }}
+          matching={leads.data?.page.total ?? 0}
+          onChanged={invalidate}
+        />
       )}
       <section className="card space-y-4">
         <div className="flex flex-wrap items-end gap-3">

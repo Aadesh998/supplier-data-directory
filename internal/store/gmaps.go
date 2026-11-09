@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/bharatmfg/directory/internal/normalize"
@@ -149,19 +150,24 @@ type GmapsLeadFilter struct {
 	HasPhone, HasWebsite                    bool
 }
 
-// ListGmapsLeads lists Google Maps leads for review, newest first.
-func ListGmapsLeads(ctx context.Context, q DBTX, f GmapsLeadFilter, limit, offset int) ([]GmapsLeadView, int, error) {
-	where := `($1 = '' OR l.status = $1) AND ($2 = '' OR l.category_slug = $2) AND ($3 = '' OR l.state_code = upper($3))
+func gmapsLeadWhere(f GmapsLeadFilter) (string, []any) {
+	return `($1 = '' OR l.status = $1) AND ($2 = '' OR l.category_slug = $2) AND ($3 = '' OR l.state_code = upper($3))
 		AND ($4 = '' OR l.title ILIKE '%' || $4 || '%' OR l.address ILIKE '%' || $4 || '%' OR l.phone ILIKE '%' || $4 || '%')
 		AND ($5 = '' OR j.job_key = $5)
-		AND (NOT $6 OR COALESCE(l.phone, '') <> '') AND (NOT $7 OR COALESCE(l.website, '') <> '')`
-	args := []any{f.Status, f.Category, f.State, f.Search, f.JobKey, f.HasPhone, f.HasWebsite}
-	from := ` FROM gmaps_leads l LEFT JOIN discovery_jobs j ON j.id = l.first_job_id WHERE `
+		AND (NOT $6 OR COALESCE(l.phone, '') <> '') AND (NOT $7 OR COALESCE(l.website, '') <> '')`,
+		[]any{f.Status, f.Category, f.State, f.Search, f.JobKey, f.HasPhone, f.HasWebsite}
+}
+
+const gmapsLeadFrom = ` FROM gmaps_leads l LEFT JOIN discovery_jobs j ON j.id = l.first_job_id WHERE `
+
+// ListGmapsLeads lists Google Maps leads for review, newest first.
+func ListGmapsLeads(ctx context.Context, q DBTX, f GmapsLeadFilter, limit, offset int) ([]GmapsLeadView, int, error) {
+	where, args := gmapsLeadWhere(f)
 	var total int
-	if err := q.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&total); err != nil {
+	if err := q.QueryRow(ctx, `SELECT count(*)`+gmapsLeadFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	out, err := collect(ctx, q, `SELECT `+gmapsLeadCols+from+where+` ORDER BY l.last_seen_at DESC, l.title LIMIT $8 OFFSET $9`,
+	out, err := collect(ctx, q, `SELECT `+gmapsLeadCols+gmapsLeadFrom+where+` ORDER BY l.last_seen_at DESC, l.title LIMIT $8 OFFSET $9`,
 		func(r pgx.Rows) (GmapsLeadView, error) { return scanGmapsLead(r) }, append(args, limit, offset)...)
 	return out, total, err
 }
@@ -300,4 +306,82 @@ func truncateRunes(s string, n int) string {
 		return string(r[:n])
 	}
 	return s
+}
+
+// BulkPromoteResult reports one batch of PromoteGmapsLeads.
+type BulkPromoteResult struct {
+	Promoted  int      `json:"promoted"`
+	Failed    int      `json:"failed"`
+	Remaining int      `json:"remaining"` // still promotable for the same filter
+	Errors    []string `json:"errors,omitempty"`
+}
+
+// PromoteGmapsLeads promotes leads matching f (only "new" and "contacted" ones) in one batch of at most
+// max leads, stopping early after budget so the HTTP request stays short. Callers repeat until Remaining
+// is 0. Each lead is its own transaction, so a failure skips that lead without undoing the others.
+func (s *Store) PromoteGmapsLeads(ctx context.Context, a Actor, f GmapsLeadFilter, max int, budget time.Duration) (BulkPromoteResult, error) {
+	res := BulkPromoteResult{}
+	if f.Status != "" && f.Status != "new" && f.Status != "contacted" {
+		return res, nil // promoted and dismissed leads are never bulk-promoted
+	}
+	where, args := gmapsLeadWhere(f)
+	where += ` AND l.status IN ('new', 'contacted')`
+	rows, err := queryIDs(ctx, s.Pool, `SELECT l.id`+gmapsLeadFrom+where+` ORDER BY l.first_seen_at, l.id LIMIT $8`, append(args, max)...)
+	if err != nil {
+		return res, err
+	}
+	start := time.Now()
+	for _, id := range rows {
+		if time.Since(start) > budget || ctx.Err() != nil {
+			break
+		}
+		if _, err := s.PromoteGmapsLead(ctx, a, id); err != nil {
+			var conflict ErrConflict
+			if errors.As(err, &conflict) {
+				continue // promoted meanwhile
+			}
+			if ctx.Err() != nil {
+				return res, ctx.Err()
+			}
+			res.Failed++
+			if len(res.Errors) < 5 {
+				res.Errors = append(res.Errors, err.Error())
+			}
+			continue
+		}
+		res.Promoted++
+	}
+	err = s.Pool.QueryRow(ctx, `SELECT count(*)`+gmapsLeadFrom+where, args...).Scan(&res.Remaining)
+	return res, err
+}
+
+func queryIDs(ctx context.Context, db DBTX, sql string, args ...any) ([]string, error) {
+	rows, err := db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// ApprovePromotedGmapsCompanies moves every draft company created from a Google Maps lead to
+// approved_private (one audit row each). It does not publish anything.
+func (s *Store) ApprovePromotedGmapsCompanies(ctx context.Context, a Actor) (int, error) {
+	actorType := a.Type
+	if actorType == "" {
+		actorType = "admin"
+	}
+	var n int
+	err := s.Pool.QueryRow(ctx, `WITH upd AS (
+			UPDATE companies c SET publication_status = 'approved_private'
+			FROM gmaps_leads l
+			WHERE l.promoted_company_id = c.id AND c.publication_status = 'draft'
+			  AND c.deleted_at IS NULL AND c.merged_into_id IS NULL
+			RETURNING c.id),
+		aud AS (
+			INSERT INTO audit_logs (actor_id, actor_type, action, entity_type, entity_id, before, after, request_id)
+			SELECT $1, $2, 'company.update', 'company', upd.id, '{"publication_status": "draft"}'::jsonb,
+			       '{"publication_status": "approved_private", "bulk": "gmaps_leads"}'::jsonb, NULLIF($3, '')
+			FROM upd)
+		SELECT count(*) FROM upd`, a.idOrNil(), actorType, a.RequestID).Scan(&n)
+	return n, err
 }

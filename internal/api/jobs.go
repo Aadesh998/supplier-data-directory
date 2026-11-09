@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bharatmfg/directory/internal/httpx"
 	"github.com/bharatmfg/directory/internal/store"
@@ -134,6 +135,43 @@ func (s *Server) listGmapsLeads(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	httpx.JSON(w, 200, httpx.NewPaged(data, p, total))
+	return nil
+}
+
+type bulkPromoteBody struct {
+	Status     string `json:"status" validate:"omitempty,oneof=new contacted"`
+	Category   string `json:"category" validate:"max=100"`
+	State      string `json:"state" validate:"max=2"`
+	Q          string `json:"q" validate:"max=200"`
+	Job        string `json:"job" validate:"max=100"`
+	HasPhone   bool   `json:"has_phone"`
+	HasWebsite bool   `json:"has_website"`
+}
+
+// promoteGmapsLeadsBulk promotes one batch of leads matching the filters; the client repeats it until
+// remaining is 0. Batches are capped by count and time so each request stays well under proxy timeouts.
+func (s *Server) promoteGmapsLeadsBulk(w http.ResponseWriter, r *http.Request) error {
+	var in bulkPromoteBody
+	if err := httpx.Decode(w, r, &in, 4<<10); err != nil {
+		return err
+	}
+	f := store.GmapsLeadFilter{Status: in.Status, Category: in.Category, State: in.State, Search: strings.TrimSpace(in.Q),
+		JobKey: in.Job, HasPhone: in.HasPhone, HasWebsite: in.HasWebsite}
+	res, err := s.Store.PromoteGmapsLeads(r.Context(), s.actor(r), f, 200, 20*time.Second)
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, res)
+	return nil
+}
+
+// approvePromotedGmapsCompanies approves (privately) every draft company created from a lead.
+func (s *Server) approvePromotedGmapsCompanies(w http.ResponseWriter, r *http.Request) error {
+	n, err := s.Store.ApprovePromotedGmapsCompanies(r.Context(), s.actor(r))
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, map[string]int{"approved": n})
 	return nil
 }
 

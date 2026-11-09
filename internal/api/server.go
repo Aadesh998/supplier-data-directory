@@ -165,6 +165,8 @@ func (s *Server) Routes() http.Handler {
 				r.Method(http.MethodPatch, "/discovery/results/{id}", h(s.updateResult))
 				r.Method(http.MethodPost, "/discovery/results/{id}/promote", s.role(h(s.promoteResult), "owner", "admin"))
 				r.Method(http.MethodGet, "/gmaps/leads", h(s.listGmapsLeads))
+				r.Method(http.MethodPost, "/gmaps/leads/promote", s.role(h(s.promoteGmapsLeadsBulk), "owner", "admin"))
+				r.Method(http.MethodPost, "/gmaps/leads/approve-promoted", s.role(h(s.approvePromotedGmapsCompanies), "owner", "admin"))
 				r.Method(http.MethodPatch, "/gmaps/leads/{id}", h(s.updateGmapsLead))
 				r.Method(http.MethodPost, "/gmaps/leads/{id}/promote", s.role(h(s.promoteGmapsLead), "owner", "admin"))
 			})

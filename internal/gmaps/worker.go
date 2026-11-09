@@ -38,7 +38,7 @@ type Config struct {
 func ConfigFromEnv() Config {
 	host, _ := os.Hostname()
 	c := Config{
-		APIURL:     envStr("GMAPS_API_URL", "https://leads.peoplvance.org/api/v1/jobs"),
+		APIURL:     envStr("GMAPS_API_URL", "http://127.0.0.1:8080/api/v1/jobs"),
 		Auth:       os.Getenv("GMAPS_AUTH"),
 		WorkerID:   envStr("GMAPS_WORKER_ID", "gmaps-"+host),
 		Depth:      envInt("GMAPS_DEPTH", 5),
