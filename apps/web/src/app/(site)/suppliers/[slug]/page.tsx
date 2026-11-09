@@ -165,13 +165,6 @@ export default async function SupplierPage({ params }: Props) {
         <p className="text-xs text-slate-600">Publishing a profile does not mean the directory team has verified it.</p>
       </header>
 
-      <div className="rounded-md border border-accent-200 bg-accent-50 px-4 py-3 text-sm">
-        Is something wrong or out of date, or do you want this listing removed?{" "}
-        <Link href={correctionHref} className="link font-semibold">
-          Request a correction or removal
-        </Link>
-      </div>
-
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-6">
           {c.description && (

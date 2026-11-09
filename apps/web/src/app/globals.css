@@ -233,6 +233,16 @@
   body {
     @apply bg-background font-sans text-foreground antialiased;
   }
+  /* Native dropdown lists take their colours from the <select>. Inputs have a see-through background,
+     which browsers draw as white, so dark-mode options were light text on white. Give them solid colours. */
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+  select option:disabled {
+    color: var(--muted-foreground);
+  }
   button,
   [role="button"],
   a,
