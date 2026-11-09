@@ -294,6 +294,7 @@ func countStored(problems []string) int {
 type JobFilter struct {
 	Status, Provider, StateCode, CategorySlug, Q string
 	Priority                                     int
+	Recent                                       bool // newest last_run_at first (for "recently finished")
 }
 
 // ListJobs lists jobs, highest priority first.
@@ -306,8 +307,11 @@ func ListJobs(ctx context.Context, q DBTX, f JobFilter, limit, offset int) ([]Di
 	if err := q.QueryRow(ctx, `SELECT count(*) FROM discovery_jobs WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	out, err := collect(ctx, q, `SELECT `+jobCols+` FROM discovery_jobs WHERE `+where+
-		` ORDER BY priority, next_run_after NULLS FIRST, job_key LIMIT $7 OFFSET $8`,
+	order := ` ORDER BY priority, next_run_after NULLS FIRST, job_key`
+	if f.Recent {
+		order = ` ORDER BY last_run_at DESC NULLS LAST, job_key`
+	}
+	out, err := collect(ctx, q, `SELECT `+jobCols+` FROM discovery_jobs WHERE `+where+order+` LIMIT $7 OFFSET $8`,
 		func(r pgx.Rows) (DiscoveryJob, error) { return scanJob(r) }, append(args, limit, offset)...)
 	return out, total, err
 }

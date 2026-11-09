@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useApi, useAuth } from "@/components/admin/AuthProvider";
 import { AdminPagination, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
@@ -105,6 +105,140 @@ function Upload({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+const PROVIDER_LABEL: Record<string, string> = { osm_overpass: "OpenStreetMap", gmaps_scraper: "Maps scraper", google_places_ids: "Places IDs" };
+
+/** Current time, updated every second (for live elapsed timers). */
+function useNow() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+function duration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function ago(iso: string, now: number): string {
+  return `${duration(now - new Date(iso).getTime())} ago`;
+}
+
+/** Side panel: the job the worker is running right now, and the last few it finished. Refreshes every 10 s. */
+function LivePanel({ dueNow }: { dueNow: number | undefined }) {
+  const api = useApi();
+  const now = useNow();
+  const running = useQuery({
+    queryKey: ["admin", "discovery", "jobs", "running"],
+    queryFn: () => api.get<Paginated<DiscoveryJob>>("/admin/discovery/jobs", { status: "running", limit: 5 }),
+    refetchInterval: 10_000,
+  });
+  const recent = useQuery({
+    queryKey: ["admin", "discovery", "jobs", "recent"],
+    queryFn: () => api.get<Paginated<DiscoveryJob>>("/admin/discovery/jobs", { sort: "recent", limit: 12 }),
+    refetchInterval: 10_000,
+  });
+  const finished = (recent.data?.data ?? []).filter((j) => j.status !== "running" && j.last_run_at).slice(0, 8);
+
+  return (
+    <aside aria-label="Worker activity" className="space-y-4 lg:sticky lg:top-6">
+      <section className="card space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Now running</h2>
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Refreshes every 10 seconds">
+            <span className={`size-2 rounded-full ${running.data?.data.length ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/40"}`} />
+            live
+          </span>
+        </div>
+        {running.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : running.error ? (
+          <ErrorState error={running.error} />
+        ) : !running.data?.data.length ? (
+          <div className="space-y-1 text-sm">
+            <p>No job running.</p>
+            <p className="text-xs text-muted-foreground">
+              {dueNow ? `${dueNow.toLocaleString("en-IN")} jobs are due; the worker picks the next one within a few minutes.` : "Nothing is due. The worker checks again every 5 minutes."}
+            </p>
+          </div>
+        ) : (
+          running.data.data.map((j) => {
+            const started = j.last_run_at ? new Date(j.last_run_at).getTime() : null;
+            const leaseLeft = j.lease_expires_at ? new Date(j.lease_expires_at).getTime() - now : null;
+            return (
+              <div key={j.id} className="space-y-2 rounded-md border p-3">
+                <p className="text-sm font-medium">{j.search_query}</p>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-muted-foreground">Running for</dt>
+                  <dd className="font-medium tabular-nums">{started ? duration(now - started) : "—"}</dd>
+                  <dt className="text-muted-foreground">Provider</dt>
+                  <dd>{PROVIDER_LABEL[j.provider] ?? j.provider}</dd>
+                  <dt className="text-muted-foreground">Area</dt>
+                  <dd>
+                    {j.location}
+                    {j.state_code && `, ${j.state_code}`}
+                  </dd>
+                  <dt className="text-muted-foreground">Attempt</dt>
+                  <dd>
+                    {j.attempts} of {j.max_attempts}
+                  </dd>
+                  <dt className="text-muted-foreground">Worker</dt>
+                  <dd className="truncate font-mono" title={j.locked_by ?? ""}>
+                    {j.locked_by ?? "—"}
+                  </dd>
+                  <dt className="text-muted-foreground">Lease</dt>
+                  <dd className={leaseLeft != null && leaseLeft < 0 ? "text-destructive" : ""}>
+                    {leaseLeft == null ? "—" : leaseLeft < 0 ? "expired (worker may have stopped)" : `renews, ${duration(leaseLeft)} left`}
+                  </dd>
+                </dl>
+                <p className="font-mono text-[11px] text-muted-foreground">{j.job_key}</p>
+              </div>
+            );
+          })
+        )}
+      </section>
+
+      <section className="card space-y-3">
+        <h2 className="font-semibold">Recently finished</h2>
+        {recent.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : !finished.length ? (
+          <p className="text-sm text-muted-foreground">No finished jobs yet.</p>
+        ) : (
+          <ul className="divide-y">
+            {finished.map((j) => {
+              const failed = !!j.last_error && j.status !== "done";
+              return (
+                <li key={j.id} className="space-y-0.5 py-2 first:pt-0 last:pb-0">
+                  <p className="text-sm leading-snug">{j.search_query}</p>
+                  <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    {failed ? (
+                      <span className="text-destructive">failed{j.status === "pending" ? ", will retry" : ""}</span>
+                    ) : j.provider === "gmaps_scraper" && (j.results_count ?? 0) > 0 ? (
+                      <Link href={`/admin/discovery/leads?job=${encodeURIComponent(j.job_key)}`} className="link">
+                        {j.results_count} leads
+                      </Link>
+                    ) : (
+                      <span>{j.results_count ?? 0} results</span>
+                    )}
+                    {j.last_run_at && <span>· {ago(j.last_run_at, now)}</span>}
+                  </p>
+                  {failed && <p className="line-clamp-2 text-xs text-destructive/80">{j.last_error}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </aside>
+  );
+}
+
 export default function DiscoveryJobsPage() {
   const api = useApi();
   const { user } = useAuth();
@@ -141,6 +275,8 @@ export default function DiscoveryJobsPage() {
         title="Discovery jobs"
         description="Search jobs that workers claim on a schedule (e.g. 4 every 5 minutes). Finished jobs run again after their refresh interval, so results stay current."
       />
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="min-w-0 space-y-6">
       {stats.data ? <Stats stats={stats.data} /> : stats.error ? <ErrorState error={stats.error} /> : <LoadingState />}
       <Upload canEdit={canEdit} />
       <section className="card space-y-3">
@@ -248,6 +384,9 @@ export default function DiscoveryJobsPage() {
           </>
         )}
       </section>
+      </div>
+      <LivePanel dueNow={stats.data?.due_now} />
+      </div>
     </div>
   );
 }

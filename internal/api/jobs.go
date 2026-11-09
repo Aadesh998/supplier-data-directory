@@ -47,7 +47,8 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) error {
 	prio, _ := strconv.Atoi(q.Get("priority"))
 	p := httpx.ParsePagination(r, 50)
 	data, total, err := store.ListJobs(r.Context(), s.Store.Pool, store.JobFilter{Status: q.Get("status"), Provider: q.Get("provider"),
-		StateCode: q.Get("state"), CategorySlug: q.Get("category"), Priority: prio, Q: q.Get("q")}, p.Limit, p.Offset())
+		StateCode: q.Get("state"), CategorySlug: q.Get("category"), Priority: prio, Q: q.Get("q"),
+		Recent: q.Get("sort") == "recent"}, p.Limit, p.Offset())
 	if err != nil {
 		return err
 	}

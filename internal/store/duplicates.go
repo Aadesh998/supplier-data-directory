@@ -44,10 +44,10 @@ func FindCandidates(ctx context.Context, q DBTX, k CandidateKey) ([]Candidate, e
 	}
 	rows, err := collect(ctx, q, `SELECT o.id, o.display_name,
 			similarity(o.normalized_name, $1) AS sim,
-			($2 <> '' AND o.website_domain = $2) AS same_domain,
+			COALESCE($2 <> '' AND o.website_domain = $2, false) AS same_domain,
 			EXISTS (SELECT 1 FROM contacts y WHERE y.company_id = o.id AND y.deleted_at IS NULL AND y.value_hash = ANY($3)) AS same_contact,
 			($4 <> '' AND EXISTS (SELECT 1 FROM facilities fb WHERE fb.company_id = o.id AND fb.deleted_at IS NULL AND lower(fb.city) = lower($4))) AS same_city,
-			($6 <> '' AND o.gstin = $6) AS same_gstin
+			COALESCE($6 <> '' AND o.gstin = $6, false) AS same_gstin
 		FROM companies o
 		WHERE o.deleted_at IS NULL AND ($5 = '' OR o.id <> $5::uuid)
 		  AND (($1 <> '' AND o.normalized_name % $1)

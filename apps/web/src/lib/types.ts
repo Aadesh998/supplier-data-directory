@@ -518,6 +518,7 @@ export type DiscoveryJob = {
   max_attempts: number;
   refresh_interval_days: number;
   locked_by: string | null;
+  lease_expires_at: string | null;
   last_run_at: string | null;
   next_run_after: string | null;
   last_error: string | null;

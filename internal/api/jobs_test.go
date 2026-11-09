@@ -392,3 +392,30 @@ func TestGmapsLeadsBulkPromoteAndApprove(t *testing.T) {
 		t.Fatalf("second approve = %d", approved.Approved)
 	}
 }
+
+// Regression: promoting a lead with a website when a similarly named company has no website (or GSTIN)
+// made the duplicate check scan NULL into a bool and fail every promotion.
+func TestGmapsPromoteWithSimilarCompanyWithoutWebsite(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pool := e.st.Pool
+	if _, err := pool.Exec(ctx, `INSERT INTO companies (display_name, slug, normalized_name, publication_status)
+		VALUES ('Shiv Shakti Textiles', 'shiv-shakti-textiles-existing', 'shiv shakti textiles', 'approved_private')`); err != nil {
+		t.Fatal(err)
+	}
+	var leadID string
+	if err := pool.QueryRow(ctx, `INSERT INTO gmaps_leads (place_key, state_code, location, title, website)
+		VALUES ('nullcheck', 'HR', 'Panipat', 'Shiv Shakti Textiles', 'https://shivshakti.example') RETURNING id`).Scan(&leadID); err != nil {
+		t.Fatal(err)
+	}
+	var res struct{ Promoted, Failed int }
+	e.login("admin").must("POST", "/api/v1/admin/gmaps/leads/promote", map[string]any{"q": "shiv shakti"}, 200, &res)
+	if res.Promoted != 1 || res.Failed != 0 {
+		t.Fatalf("promote = %+v, want 1 promoted", res)
+	}
+	var pairs int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM duplicate_pairs`).Scan(&pairs)
+	if pairs == 0 {
+		t.Fatal("the similar existing company should be flagged as a possible duplicate")
+	}
+}
