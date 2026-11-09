@@ -172,6 +172,8 @@ func (w *Worker) scrape(ctx context.Context, j store.DiscoveryJob) ([]store.Gmap
 	// The scraper runs jobs one at a time, so allow queue time on top of the job's own max time.
 	deadline := time.Now().Add(w.Cfg.MaxTime + 30*time.Minute)
 	var workingSince time.Time
+	queuedSince := time.Now()
+	queueRestarted := false
 	lastSize := -1
 	for {
 		if !sleep(ctx, w.Cfg.Poll) {
@@ -199,6 +201,16 @@ func (w *Worker) scrape(ctx context.Context, j store.DiscoveryJob) ([]store.Gmap
 			return ParseCSV(data)
 		case "failed":
 			return nil, errors.New("scraper job failed")
+		case "pending":
+			// Still queued behind another scraper job long after any job should have finished: that job is
+			// hung (e.g. one abandoned when this worker restarted). Restart the scraper once; it keeps its
+			// queue across restarts, so our job runs next.
+			if !queueRestarted && time.Since(queuedSince) > w.Cfg.MaxTime+w.Cfg.Grace {
+				queueRestarted = true
+				w.Log.Warn("scraper job still queued; another job is blocking the scraper", "scraper_job", id,
+					"waited", time.Since(queuedSince).Round(time.Second).String())
+				w.restartScraper()
+			}
 		case "working":
 			if workingSince.IsZero() {
 				workingSince = time.Now()

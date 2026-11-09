@@ -46,12 +46,13 @@ func TestParseCSV(t *testing.T) {
 
 // fakeScraper mimics the scraper API: jobs finish on the second status check.
 type fakeScraper struct {
-	mu      sync.Mutex
-	checks  map[string]int
-	created []gmaps.JobRequest
-	deleted []string
-	csv     string
-	stuck   bool // never reports "ok", like the real scraper when it hangs
+	mu           sync.Mutex
+	checks       map[string]int
+	created      []gmaps.JobRequest
+	deleted      []string
+	csv          string
+	stuck        bool   // never reports "ok", like the real scraper when it hangs
+	blockedUntil string // file: jobs stay "pending" until it exists (another job blocks the queue)
 }
 
 func (f *fakeScraper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +70,12 @@ func (f *fakeScraper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && strings.HasSuffix(path, "/download"):
 		_, _ = w.Write([]byte(f.csv))
 	case r.Method == http.MethodGet:
+		if f.blockedUntil != "" {
+			if _, err := os.Stat(f.blockedUntil); err != nil {
+				_, _ = w.Write([]byte(`{"ID":"x","Status":"pending"}`))
+				return
+			}
+		}
 		f.checks[path]++
 		st := "working"
 		if f.checks[path] >= 2 && !f.stuck {
@@ -212,5 +219,37 @@ func TestWorkerUsesResultsOfHungScraperJob(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("restart command did not run after the hung job")
+	}
+}
+
+func TestWorkerRestartsScraperBlockedByAnotherJob(t *testing.T) {
+	pool := testutil.NewDB(t)
+	testutil.Seed(t, pool)
+	box, _ := secure.NewBox("dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=")
+	st := store.New(pool, box)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO discovery_jobs (job_key, provider, keyword, search_query, location, state_code, latitude, longitude, radius_km)
+		VALUES ('g4', 'gmaps_scraper', 'tiles', 'tiles in Morbi', 'Morbi', 'GJ', 22.8, 70.8, 15)`); err != nil {
+		t.Fatal(err)
+	}
+	// The scraper is busy with someone else's hung job: ours stays "pending" until the scraper restarts.
+	restarted := t.TempDir() + "/restarted"
+	fake := &fakeScraper{checks: map[string]int{}, csv: resultsCSV, blockedUntil: restarted}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	w := gmaps.NewWorker(gmaps.Config{APIURL: srv.URL + "/api/v1/jobs", WorkerID: "w1", Depth: 1,
+		MaxTime: 20 * time.Millisecond, Poll: 10 * time.Millisecond, RestartCmd: "touch " + restarted},
+		st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	jobs, err := store.ClaimJobs(ctx, pool, "w1", 1, []string{store.ProviderGmaps})
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("claim = %v, %v", jobs, err)
+	}
+	w.RunJob(ctx, jobs[0])
+
+	var status string
+	var results int
+	_ = pool.QueryRow(ctx, `SELECT status, results_count FROM discovery_jobs WHERE job_key = 'g4'`).Scan(&status, &results)
+	if status != "done" || results != 2 {
+		t.Fatalf("blocked job = %s results=%d, want done with 2 after the scraper restart", status, results)
 	}
 }
