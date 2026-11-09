@@ -55,7 +55,7 @@ Intended workflow: search → recognise a business → save its place ID as a le
 
 ## Discovery job queue
 
-`scripts/jobs/jobs.csv` lists 14,419 sector × location searches across all 36 states/UTs. Upload it in Admin → Discovery jobs. Workers (the Cloudflare cron, or any process holding `WORKER_TOKEN`) claim and run them.
+`scripts/jobs/jobs.csv` lists 14,419 sector × location searches across all 36 states/UTs. Upload it in Admin → Discovery jobs. The `gmaps-worker` service on EC2 runs `gmaps_scraper` jobs one at a time; any process holding `WORKER_TOKEN` can claim other providers' jobs through the worker API.
 
 | Provider | What is stored | Use |
 |---|---|---|

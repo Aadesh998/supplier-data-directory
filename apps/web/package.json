@@ -13,10 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test",
-    "cf:build": "opennextjs-cloudflare build",
-    "cf:preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@hookform/resolvers": "7.0.3",
@@ -30,7 +27,6 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "1.20.13",
     "@playwright/test": "1.65.0",
     "@tailwindcss/postcss": "4.3.5",
     "@testing-library/dom": "10.4.2",
@@ -47,7 +43,6 @@
     "tailwindcss": "4.3.5",
     "typescript": "6.0.3",
     "vite": "8.3.6",
-    "vitest": "5.1.0",
-    "wrangler": "4.152.0"
+    "vitest": "5.1.0"
   }
 }

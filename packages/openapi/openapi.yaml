@@ -1050,4 +1050,4 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [worker_id, error], properties: { worker_id: { type: string }, error: { type: string } } } } } }
       responses: { '200': { description: updated job } }
   /api/v1/worker/maintenance:
-    post: { tags: [worker], summary: Run maintenance jobs (used by the Cloudflare daily cron), responses: { '200': { description: report } } }
+    post: { tags: [worker], summary: Run maintenance jobs (the EC2 box runs them daily with a systemd timer instead), responses: { '200': { description: report } } }

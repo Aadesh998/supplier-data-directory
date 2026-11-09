@@ -1,6 +1,6 @@
 # ADR 0009: Cloudflare Workers + Containers as a deployment target
 
-**Status:** superseded by [ADR 0010](0010-ec2-api-cloudflare-workers-web.md) · 2026-11-09 (was accepted 2026-11-08)
+**Status:** superseded by [ADR 0010](0010-everything-on-ec2.md) · 2026-11-09 (was accepted 2026-11-08)
 
 ## Context
 The founder wants to run the platform, including the backend and the scheduled discovery jobs, on Cloudflare rather than a VM. The Go API and Next.js app are already container images. Cloudflare Workers cannot run a Go binary or a Node server directly, but Cloudflare Containers can run Docker images behind a Worker.

@@ -11,7 +11,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/peoplvance
 EnvironmentFile=/home/ubuntu/peoplvance/.env
-# nginx (api.peoplvance.org) is the only way in; never listen publicly.
+# nginx (peoplvance.org/api/) and the website are the only clients; never listen publicly.
 Environment=HTTP_ADDR=127.0.0.1:8090
 Environment=TRUST_PROXY_HEADERS=true
 ExecStart=/home/ubuntu/peoplvance/peoplvance-api serve

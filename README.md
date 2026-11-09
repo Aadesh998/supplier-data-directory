@@ -18,7 +18,7 @@
 | **Safety rails in the database** | Triggers and constraints refuse to publish without public-display permission. Personal contacts can never be public. Permissions default to `false`. The audit log is append-only. |
 | **Discovery** | A Google Places lookup that is off by default. Results are transient; only place IDs may be stored as leads. |
 | **Discovery job queue** | Upload a jobs CSV (e.g. `scripts/jobs/jobs.csv`: 14,419 sector × location searches across India) whenever you like. Workers claim jobs on a schedule (default 4 every 5 minutes) with leases, retries and backoff. Finished jobs repeat after a refresh interval, so results stay current. Executors: OpenStreetMap (Overpass) and Google Places ID-only. The database refuses to store Google content beyond place IDs. Results are leads for review; nothing is published automatically. |
-| **Deployment targets** | Docker Compose locally or on a VPS with Caddy, or the default split: **API + Google Maps worker on EC2** (one Go binary under systemd, `make ec2-deploy`) and the **website on Cloudflare Workers** (Next.js via OpenNext, `make web-deploy`). |
+| **Deployment targets** | Docker Compose locally or on a VPS with Caddy, or the default: **everything on one EC2 box** (Go API + Google Maps worker as one binary, Next.js website, nginx, systemd; `make ec2-deploy-all`). |
 
 ## Run it locally
 
@@ -58,7 +58,7 @@ Admin → **Imports** → upload the CSV (e.g. `suppliers_import.csv`, which is 
 ### Running discovery jobs
 
 1. Admin → **Discovery jobs** → upload `scripts/jobs/jobs.csv`. Re-upload any time: rows match by `job_id`, and run history is kept unless you tick "reset".
-2. A worker processes the queue. `gmaps_scraper` jobs are run by the `gmaps-worker` service on EC2, one at a time (see [deployment runbook](docs/runbooks/cloudflare.md)). Any other process can use the worker API with `WORKER_TOKEN`: `POST /api/v1/worker/jobs/claim` → run → `…/complete` or `…/fail` (see `packages/openapi/openapi.yaml`).
+2. A worker processes the queue. `gmaps_scraper` jobs are run by the `gmaps-worker` service on EC2, one at a time (see [EC2 runbook](docs/runbooks/ec2.md)). Any other process can use the worker API with `WORKER_TOKEN`: `POST /api/v1/worker/jobs/claim` → run → `…/complete` or `…/fail` (see `packages/openapi/openapi.yaml`).
 3. Review leads in Admin → **Discovery results**. Promote OpenStreetMap results to private draft companies (internal-only source; duplicates are flagged), or mark them contacted after inviting the business to register.
 
 Expect thin coverage from OpenStreetMap; it is a lead source, not a complete register. On public Overpass servers, expect slow responses. Timeouts are retried automatically.
@@ -96,7 +96,7 @@ db/migrations/       PostgreSQL schema (Goose)
 db/seeds/            Synthetic seed data (private) + dev-only demo publish
 packages/openapi/    OpenAPI 3.1 contract
 infra/               Dockerfiles, local Postgres init, production compose + Caddy
-infra/ec2/          systemd units, nginx site and deploy scripts for the EC2 box (API + gmaps worker)
+infra/ec2/          systemd units, nginx site and deploy scripts for the EC2 box (API, gmaps worker, website)
 scripts/             backup.sh / restore.sh, jobs/jobs.csv (discovery job list)
 docs/                Architecture, ERD, data dictionary, policies, ADRs, runbooks
 ```
@@ -110,7 +110,7 @@ docs/                Architecture, ERD, data dictionary, policies, ADRs, runbook
 - [Privacy and security](docs/privacy-and-security.md): threat model, controls, retention schedule
 - [API examples](docs/api-examples.md): curl walkthrough
 - [Supplier-facing copy](docs/supplier-copy.md): registration text and email templates
-- [Deployment on a VPS](docs/runbooks/deployment.md), [deployment on EC2 + Cloudflare](docs/runbooks/cloudflare.md), [operations](docs/runbooks/operations.md), [launch checklist](docs/launch-checklist.md)
+- [Deployment on a VPS](docs/runbooks/deployment.md), [deployment on EC2](docs/runbooks/ec2.md), [operations](docs/runbooks/operations.md), [launch checklist](docs/launch-checklist.md)
 - [Architecture decision records](docs/adr/)
 
 ## Testing at a glance
