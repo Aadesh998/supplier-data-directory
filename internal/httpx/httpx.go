@@ -83,7 +83,11 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		apiErr = E(http.StatusConflict, "conflict", "a record with the same unique value already exists").
 			WithDetails(map[string]any{"constraint": pgErr.ConstraintName})
 	case errors.As(err, &pgErr) && (pgErr.Code == "23514" || pgErr.Code == "23503" || pgErr.Code == "22P02" || pgErr.Code == "23502"):
-		apiErr = E(http.StatusUnprocessableEntity, "constraint_violation", "the change violates a data rule").
+		msg := "the change violates a data rule"
+		if friendly, ok := constraintMessages[pgErr.ConstraintName]; ok {
+			msg = friendly
+		}
+		apiErr = E(http.StatusUnprocessableEntity, "constraint_violation", msg).
 			WithDetails(map[string]any{"constraint": pgErr.ConstraintName, "rule": pgErr.Message})
 	case errors.Is(err, context.Canceled):
 		return
@@ -240,4 +244,10 @@ func ParsePagination(r *http.Request, defLimit int) Pagination {
 		p.Limit = min(v, 100)
 	}
 	return p
+}
+
+// constraintMessages turns known database rules into messages an admin can act on.
+var constraintMessages = map[string]string{
+	"data_sources_public_requires_internal":     "Public display needs Internal use to be allowed too. Tick Internal use and save again.",
+	"data_sources_commercial_requires_internal": "Commercial/API distribution needs Internal use to be allowed too. Tick Internal use and save again.",
 }

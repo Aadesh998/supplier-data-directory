@@ -1,10 +1,10 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
-import { useApi } from "@/components/admin/AuthProvider";
+import { useApi, useAuth } from "@/components/admin/AuthProvider";
 import { SourceSelect } from "@/components/admin/SourceSelect";
 import { AdminPagination, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
@@ -17,6 +17,72 @@ const PUBLICATION = ["draft", "submitted", "under_review", "approved_private", "
 const VERIFICATION = ["unverified", "partially_verified", "verified", "stale"];
 
 type Filters = { q: string; publication_status: string; verification_status: string; category: string; state: string };
+
+type BulkPublishResult = { published: number; remaining: number; blocked: Record<string, number> };
+
+/** Publishes every approved company that passes the publish checks, and explains the rest. */
+function PublishEligible() {
+  const api = useApi();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const [result, setResult] = useState<BulkPublishResult | null>(null);
+  const m = useMutation({
+    mutationFn: () => api.post<BulkPublishResult>("/admin/companies/publish-eligible", {}),
+    onSuccess: (r) => {
+      setResult(r);
+      setConfirming(false);
+      toast.success(r.published === 1 ? "Published 1 company." : `Published ${r.published} companies.`);
+      void qc.invalidateQueries();
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  });
+  return (
+    <div className="flex flex-col items-end gap-2">
+      {confirming ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Publish every approved company that passes the checks?</span>
+          <button type="button" className="btn-primary" disabled={m.isPending} onClick={() => m.mutate()}>
+            {m.isPending ? "Publishing…" : "Yes, publish"}
+          </button>
+          <button type="button" className="btn-ghost" disabled={m.isPending} onClick={() => setConfirming(false)}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button type="button" className="btn-primary" onClick={() => setConfirming(true)}>
+          Publish all eligible
+        </button>
+      )}
+      {result && result.remaining > 0 && (
+        <div role="status" className="max-w-md rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-sm">
+          <p className="font-medium">{result.remaining} approved companies are still private:</p>
+          <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+            {Object.entries(result.blocked)
+              .sort((a, b) => b[1] - a[1])
+              .map(([reason, n]) => (
+                <li key={reason}>
+                  {n} — {reason}
+                </li>
+              ))}
+          </ul>
+          <p className="mt-1 text-xs text-muted-foreground">Fix them on each company page, then run this again.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompanyActions() {
+  const { user } = useAuth();
+  const canPublish = user?.role === "owner" || user?.role === "admin";
+  return (
+    <div className="flex flex-wrap items-start justify-end gap-2">
+      <CreateCompany />
+      {canPublish && <PublishEligible />}
+    </div>
+  );
+}
 
 function CreateCompany() {
   const api = useApi();
@@ -101,7 +167,7 @@ function CompaniesInner() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Companies" description="All company records, including private ones. Only published records with public-display permission appear on the public site." actions={<CreateCompany />} />
+      <PageHeader title="Companies" description="All company records, including private ones. Only published records with public-display permission appear on the public site." actions={<CompanyActions />} />
       <form onSubmit={apply} className="card grid gap-3 md:grid-cols-6" role="search">
         <div className="md:col-span-2">
           <label htmlFor="cf-q" className="label">

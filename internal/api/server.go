@@ -104,6 +104,7 @@ func (s *Server) Routes() http.Handler {
 
 				r.Method(http.MethodGet, "/companies", h(s.adminListCompanies))
 				r.Method(http.MethodPost, "/companies", s.role(h(s.adminCreateCompany), "owner", "admin"))
+				r.Method(http.MethodPost, "/companies/publish-eligible", s.role(h(s.adminPublishEligible), "owner", "admin"))
 				r.Method(http.MethodGet, "/companies/{id}", h(s.adminGetCompany))
 				r.Method(http.MethodPatch, "/companies/{id}", s.role(h(s.adminUpdateCompany), "owner", "admin"))
 				r.Method(http.MethodPost, "/companies/{id}/facilities", s.role(h(s.adminAddFacility), "owner", "admin"))

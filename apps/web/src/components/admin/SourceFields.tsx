@@ -54,8 +54,17 @@ export function sourceInputFromForm(v: SourceFormValues) {
 
 export function SourceFields({ value, onChange, idPrefix, showPermissionHelp = true }: { value: SourceFormValues; onChange: (v: SourceFormValues) => void; idPrefix: string; showPermissionHelp?: boolean }) {
   const set = (k: keyof SourceFormValues) => (e: { target: { value: string } }) => onChange({ ...value, [k]: e.target.value });
-  const flag = (k: "allowed_internal_use" | "allowed_public_display" | "allowed_commercial_api") => (e: { target: { checked: boolean } }) =>
-    onChange({ ...value, [k]: e.target.checked });
+  // Public display and commercial use both require internal use (a database rule), so keep them consistent:
+  // ticking either ticks internal use, and unticking internal use unticks both.
+  const flag = (k: "allowed_internal_use" | "allowed_public_display" | "allowed_commercial_api") => (e: { target: { checked: boolean } }) => {
+    const next = { ...value, [k]: e.target.checked };
+    if (k !== "allowed_internal_use" && e.target.checked) next.allowed_internal_use = true;
+    if (k === "allowed_internal_use" && !e.target.checked) {
+      next.allowed_public_display = false;
+      next.allowed_commercial_api = false;
+    }
+    onChange(next);
+  };
   return (
     <div className="space-y-3">
       <div className="grid gap-3 md:grid-cols-2">

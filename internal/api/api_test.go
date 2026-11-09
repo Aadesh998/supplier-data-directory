@@ -692,3 +692,38 @@ func TestPublicCategoryAndStateEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishEligibleBulk(t *testing.T) {
+	e := newEnv(t)
+	pub := e.anon()
+	admin := e.login("admin")
+	approve := func(name string, publicListing bool) {
+		var created struct{ ID string }
+		pub.must("POST", "/api/v1/supplier-submissions", submission(name, publicListing, false), 202, &created)
+		admin.must("POST", "/api/v1/admin/submissions/"+created.ID+"/approve", nil, 200, nil)
+	}
+	approve("Bulk Tiles Co", true)
+	approve("Bulk Private Co", false)
+
+	e.login("reviewer").must("POST", "/api/v1/admin/companies/publish-eligible", nil, 403, nil)
+
+	var res struct {
+		Published int            `json:"published"`
+		Remaining int            `json:"remaining"`
+		Blocked   map[string]int `json:"blocked"`
+	}
+	admin.must("POST", "/api/v1/admin/companies/publish-eligible", nil, 200, &res)
+	// Remaining also counts the private synthetic seed companies.
+	if res.Published != 1 || res.Remaining < 1 || len(res.Blocked) == 0 {
+		t.Fatalf("bulk publish = %+v, want 1 published and the rest blocked with reasons", res)
+	}
+	remaining := res.Remaining
+	pub.must("GET", "/api/v1/public/companies/bulk-tiles-co", nil, 200, nil)
+	assertNotPublic(t, pub, "bulk-private-co")
+
+	// Idempotent: nothing left to publish.
+	admin.must("POST", "/api/v1/admin/companies/publish-eligible", map[string]any{}, 200, &res)
+	if res.Published != 0 || res.Remaining != remaining {
+		t.Fatalf("second run = %+v", res)
+	}
+}

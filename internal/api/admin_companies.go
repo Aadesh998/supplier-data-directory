@@ -163,6 +163,26 @@ func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) error {
 	return s.respondCompany(w, r, 200, id)
 }
 
+type publishEligibleBody struct {
+	SourceID *string `json:"source_id" validate:"omitempty,uuid"`
+}
+
+// adminPublishEligible publishes every approved company that passes the publish checks.
+func (s *Server) adminPublishEligible(w http.ResponseWriter, r *http.Request) error {
+	var in publishEligibleBody
+	if r.ContentLength != 0 {
+		if err := httpx.Decode(w, r, &in, 16<<10); err != nil {
+			return err
+		}
+	}
+	res, err := s.Store.PublishEligible(r.Context(), s.actor(r), in.SourceID)
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, res)
+	return nil
+}
+
 type reasonBody struct {
 	Reason string `json:"reason" validate:"max=2000"`
 }

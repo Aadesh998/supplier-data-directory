@@ -201,7 +201,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </button>
           <span className="truncate text-sm font-semibold">{SITE_NAME} admin</span>
         </div>
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
+        {/* `relative` contains absolutely positioned children (e.g. sr-only labels) in this scroll area;
+            without it they are placed against the page and stretch it past the viewport. */}
+        <main id="main" tabIndex={-1} className="relative min-w-0 flex-1 overflow-y-auto focus:outline-none">
           <div className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">{children}</div>
         </main>
       </div>

@@ -357,6 +357,16 @@ func (s *Store) listContacts(ctx context.Context, q DBTX, companyID string) ([]C
 	return out, nil
 }
 
+// Publish requirements as SQL predicates on companies c (shared by CheckPublishable and PublishEligible).
+const (
+	publishNameOK = `EXISTS (SELECT 1 FROM public_field_permissions p WHERE p.company_id = c.id AND p.entity_type = 'company'
+		        AND p.entity_id = c.id AND p.field_name = 'display_name')`
+	publishCategoryOK = `EXISTS (SELECT 1 FROM company_categories cc JOIN data_sources ds ON ds.id = cc.source_id
+		        WHERE cc.company_id = c.id AND ds.allowed_public_display)`
+	publishLocationOK = `EXISTS (SELECT 1 FROM facilities f JOIN public_field_permissions p ON p.entity_type = 'facility' AND p.entity_id = f.id
+		        WHERE f.company_id = c.id AND f.deleted_at IS NULL AND p.field_name IN ('city', 'state_code'))`
+)
+
 // CheckPublishable returns the reasons a company cannot be published (empty = publishable).
 func CheckPublishable(ctx context.Context, q DBTX, id string) ([]string, error) {
 	var status string
@@ -364,12 +374,7 @@ func CheckPublishable(ctx context.Context, q DBTX, id string) ([]string, error) 
 	var namePermitted, hasPublicCategory, hasPublicLocation bool
 	err := q.QueryRow(ctx, `SELECT c.publication_status, c.deleted_at IS NOT NULL, c.merged_into_id IS NOT NULL,
 		c.public_listing_withdrawn_at IS NOT NULL,
-		EXISTS (SELECT 1 FROM public_field_permissions p WHERE p.company_id = c.id AND p.entity_type = 'company'
-		        AND p.entity_id = c.id AND p.field_name = 'display_name'),
-		EXISTS (SELECT 1 FROM company_categories cc JOIN data_sources ds ON ds.id = cc.source_id
-		        WHERE cc.company_id = c.id AND ds.allowed_public_display),
-		EXISTS (SELECT 1 FROM facilities f JOIN public_field_permissions p ON p.entity_type = 'facility' AND p.entity_id = f.id
-		        WHERE f.company_id = c.id AND f.deleted_at IS NULL AND p.field_name IN ('city', 'state_code'))
+		`+publishNameOK+`, `+publishCategoryOK+`, `+publishLocationOK+`
 		FROM companies c WHERE c.id = $1`, id).Scan(&status, &deleted, &merged, &withdrawn, &namePermitted,
 		&hasPublicCategory, &hasPublicLocation)
 	if err != nil {
@@ -1021,4 +1026,57 @@ func MarkStale(ctx context.Context, q DBTX) (int64, error) {
 	tag, err := q.Exec(ctx, `UPDATE companies SET verification_status = 'stale'
 		WHERE verification_status IN ('verified', 'partially_verified') AND next_review_at < now() AND deleted_at IS NULL`)
 	return tag.RowsAffected(), err
+}
+
+// BulkPublishResult reports what PublishEligible did.
+type BulkPublishResult struct {
+	Published int            `json:"published"`
+	Remaining int            `json:"remaining"` // approved but still blocked
+	Blocked   map[string]int `json:"blocked"`   // reason -> number of companies
+}
+
+// PublishEligible publishes every approved_private company that passes the same checks as Publish,
+// optionally only those with data from sourceID. It is one set-based statement (with one audit row
+// per company), so it stays fast for thousands of companies on a remote database.
+func (s *Store) PublishEligible(ctx context.Context, a Actor, sourceID *string) (BulkPublishResult, error) {
+	res := BulkPublishResult{Blocked: map[string]int{}}
+	actorType := a.Type
+	if actorType == "" {
+		actorType = "admin"
+	}
+	scope := `c.publication_status = 'approved_private' AND c.deleted_at IS NULL AND c.merged_into_id IS NULL
+		AND c.public_listing_withdrawn_at IS NULL
+		AND ($1::uuid IS NULL OR EXISTS (SELECT 1 FROM field_provenance fx WHERE fx.company_id = c.id AND fx.source_id = $1::uuid))`
+	err := s.InTx(ctx, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `WITH upd AS (
+				UPDATE companies c SET publication_status = 'published', published_at = COALESCE(c.published_at, now())
+				WHERE `+scope+` AND `+publishNameOK+` AND `+publishCategoryOK+` AND `+publishLocationOK+`
+				RETURNING c.id),
+			aud AS (
+				INSERT INTO audit_logs (actor_id, actor_type, action, entity_type, entity_id, before, after, request_id)
+				SELECT $2, $3, 'company.publish', 'company', upd.id, NULL,
+				       '{"publication_status": "published", "bulk": true}'::jsonb, NULLIF($4, '')
+				FROM upd)
+			SELECT count(*) FROM upd`, sourceID, a.idOrNil(), actorType, a.RequestID).Scan(&res.Published)
+		if err != nil {
+			return err
+		}
+		var noName, noCategory, noLocation int
+		if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE NOT `+publishNameOK+`),
+				count(*) FILTER (WHERE NOT `+publishCategoryOK+`), count(*) FILTER (WHERE NOT `+publishLocationOK+`)
+			FROM companies c WHERE `+scope, sourceID).Scan(&res.Remaining, &noName, &noCategory, &noLocation); err != nil {
+			return err
+		}
+		for reason, n := range map[string]int{
+			"the name's source does not allow public display":           noName,
+			"no category from a source that allows public display":      noCategory,
+			"no city or state from a source that allows public display": noLocation,
+		} {
+			if n > 0 {
+				res.Blocked[reason] = n
+			}
+		}
+		return nil
+	})
+	return res, err
 }
