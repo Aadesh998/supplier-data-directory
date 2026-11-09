@@ -10,7 +10,7 @@ chmod +x "$NEW"
 
 # Migrate with the NEW binary before switching, so a failed migration leaves the old version running.
 echo "==> Migrating"
-( set -a; . "$APP/.env"; set +a; "$NEW" migrate up )
+BIN="$NEW" "$APP/run.sh" migrate up
 
 [ -f "$APP/peoplvance-api" ] && cp -f "$APP/peoplvance-api" "$APP/peoplvance-api.prev"
 # mv over the running binary is safe: the old process keeps its inode until restart.

@@ -12,12 +12,8 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/peoplvance/web
 # Same env file as the API: INTERNAL_API_TOKEN, NEXT_PUBLIC_* are read at runtime.
 EnvironmentFile=/home/ubuntu/peoplvance/.env
-Environment=NODE_ENV=production
-Environment=PORT=3100
-Environment=HOSTNAME=127.0.0.1
-Environment=API_INTERNAL_URL=http://127.0.0.1:8090
-Environment=NODE_OPTIONS=--max-old-space-size=256
-ExecStart=/usr/bin/node /home/ubuntu/peoplvance/web/server.js
+# Set via env(1), not Environment=, because values in EnvironmentFile would override Environment=.
+ExecStart=/usr/bin/env NODE_ENV=production PORT=3100 HOSTNAME=127.0.0.1 API_INTERNAL_URL=http://127.0.0.1:8090 NODE_OPTIONS=--max-old-space-size=256 /usr/bin/node /home/ubuntu/peoplvance/web/server.js
 Restart=always
 RestartSec=5
 KillSignal=SIGTERM

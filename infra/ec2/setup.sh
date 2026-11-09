@@ -35,6 +35,6 @@ else
     sudo nginx -t && sudo systemctl reload nginx
     echo "nginx: peoplvance.org written. For HTTPS: sudo certbot --nginx -d peoplvance.org -d www.peoplvance.org"
 fi
-cp "$HERE/deploy.sh" "$HERE/deploy-web.sh" "$HERE/rollback.sh" "$APP/"
-chmod +x "$APP/deploy.sh" "$APP/deploy-web.sh" "$APP/rollback.sh"
+cp "$HERE/deploy.sh" "$HERE/deploy-web.sh" "$HERE/rollback.sh" "$HERE/run.sh" "$APP/"
+chmod +x "$APP/deploy.sh" "$APP/deploy-web.sh" "$APP/rollback.sh" "$APP/run.sh"
 echo "Setup done."

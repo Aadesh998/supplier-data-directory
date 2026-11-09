@@ -24,7 +24,7 @@ Why: see [ADR 0010](../adr/0010-everything-on-ec2.md). Files: `infra/ec2/`.
 4. **HTTPS:** `make ec2-ssh`, then `sudo certbot --nginx -d peoplvance.org -d www.peoplvance.org`.
 5. **Admin account** (once), on the box:
    ```bash
-   cd ~/peoplvance && set -a && . ./.env && set +a && ADMIN_PASSWORD='…' ./peoplvance-api create-admin --email you@peoplvance.org --role owner
+   ADMIN_PASSWORD='…' ~/peoplvance/run.sh create-admin --email you@peoplvance.org --role owner
    ```
 6. **Jobs:** Admin → Discovery jobs → upload `scripts/jobs/jobs.csv`. The gmaps worker picks them up within 5 minutes.
 
