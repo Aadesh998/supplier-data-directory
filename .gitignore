@@ -14,3 +14,6 @@ apps/web/next-env.d.ts
 /suppliers_import.csv
 /data/
 
+apps/web/.open-next/
+apps/web/.wrangler/
+apps/web/.dev.vars

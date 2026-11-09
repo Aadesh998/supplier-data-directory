@@ -1,0 +1,29 @@
+[Unit]
+Description=Peoplvance API
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/peoplvance
+EnvironmentFile=/home/ubuntu/peoplvance/.env
+# nginx (api.peoplvance.org) is the only way in; never listen publicly.
+Environment=HTTP_ADDR=127.0.0.1:8090
+Environment=TRUST_PROXY_HEADERS=true
+ExecStart=/home/ubuntu/peoplvance/peoplvance-api serve
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+# Small box (1 GB) shared with the scraper and santimentos.
+MemoryMax=300M
+LimitNOFILE=65536
+StandardOutput=append:/home/ubuntu/peoplvance/api.log
+StandardError=append:/home/ubuntu/peoplvance/api.log
+
+[Install]
+WantedBy=multi-user.target

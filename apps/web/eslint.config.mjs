@@ -6,6 +6,8 @@ export default defineConfig([
   ...nextVitals,
   ...nextTs,
   globalIgnores([
+    ".open-next/**",
+    ".wrangler/**",
     ".next/**",
     "out/**",
     "build/**",

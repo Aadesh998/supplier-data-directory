@@ -1,0 +1,13 @@
+[Unit]
+Description=Peoplvance maintenance (re-verification, retention, permission expiry)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/peoplvance
+EnvironmentFile=/home/ubuntu/peoplvance/.env
+ExecStart=/home/ubuntu/peoplvance/peoplvance-api maintenance
+StandardOutput=append:/home/ubuntu/peoplvance/api.log
+StandardError=append:/home/ubuntu/peoplvance/api.log

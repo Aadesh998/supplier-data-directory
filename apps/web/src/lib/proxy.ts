@@ -27,6 +27,9 @@ const DROP_RESPONSE_HEADERS = new Set([
 ]);
 
 function clientIp(req: Request): string | undefined {
+  // On Cloudflare Workers the edge sets CF-Connecting-IP to the visitor's address; clients can't override it.
+  const cf = req.headers.get("cf-connecting-ip");
+  if (cf) return cf;
   const xff = req.headers.get("x-forwarded-for");
   if (xff) return xff;
   return req.headers.get("x-real-ip") ?? undefined;

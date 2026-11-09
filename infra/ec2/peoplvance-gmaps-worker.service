@@ -1,0 +1,27 @@
+[Unit]
+Description=Peoplvance Google Maps worker (one discovery job at a time)
+Wants=network-online.target google-scrape.service
+After=network-online.target google-scrape.service peoplvance-api.service
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/peoplvance
+EnvironmentFile=/home/ubuntu/peoplvance/.env
+# The scraper runs on this box (google-scrape.service), so talk to it directly.
+Environment=GMAPS_API_URL=http://127.0.0.1:8080/api/v1/jobs
+ExecStart=/home/ubuntu/peoplvance/peoplvance-api gmaps-worker
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+# A stop releases the running job back to the queue; give it time to do that.
+TimeoutStopSec=45
+MemoryMax=200M
+StandardOutput=append:/home/ubuntu/peoplvance/gmaps-worker.log
+StandardError=append:/home/ubuntu/peoplvance/gmaps-worker.log
+
+[Install]
+WantedBy=multi-user.target

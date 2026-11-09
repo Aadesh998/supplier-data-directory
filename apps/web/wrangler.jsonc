@@ -1,0 +1,24 @@
+{
+  // Peoplvance website on Cloudflare Workers (Next.js via OpenNext, no containers).
+  // Build + deploy: `npm run cf:deploy` (or `make web-deploy` from the repo root).
+  // The API runs on EC2 at API_INTERNAL_URL; /api/* on this site is proxied there.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "peoplvance-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  "routes": [
+    { "pattern": "peoplvance.org", "custom_domain": true },
+    { "pattern": "www.peoplvance.org", "custom_domain": true }
+  ],
+  "vars": {
+    "API_INTERNAL_URL": "https://api.peoplvance.org",
+    "NEXT_PUBLIC_SITE_URL": "https://peoplvance.org",
+    "NEXT_PUBLIC_ALLOW_INDEXING": "false",
+    "NEXT_PUBLIC_PRIVACY_EMAIL": "privacy@peoplvance.org",
+    "NEXT_PUBLIC_CONTACT_EMAIL": "hello@peoplvance.org"
+  }
+  // Secret: npx wrangler secret put INTERNAL_API_TOKEN   (same value as on EC2)
+}
