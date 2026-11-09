@@ -7,8 +7,8 @@ import type { State } from "@/lib/types";
 
 export async function generateMetadata() {
   return pageMetadata({
-    title: "Suppliers by state",
-    description: "Browse published manufacturer and supplier profiles by Indian state and union territory.",
+    title: "Manufacturers by State: All 36 States & UTs",
+    description: "Find manufacturers and industrial suppliers in every Indian state and union territory, from Gujarat and Maharashtra to Tamil Nadu and Uttar Pradesh.",
     path: "/locations",
   });
 }

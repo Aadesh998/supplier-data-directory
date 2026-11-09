@@ -3,6 +3,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import { cache } from "react";
 import { Breadcrumbs } from "@/components/site/Breadcrumbs";
 import { JsonLd } from "@/components/site/JsonLd";
+import { LockedRow, LockIcon, UnlockCta, accessHref } from "@/components/site/Locked";
 import { ApiUnavailableNotice, SyntheticBanner } from "@/components/site/Notices";
 import { ProfileRemoved } from "@/components/site/ProfileRemoved";
 import { isSynthetic } from "@/lib/constants";
@@ -24,11 +25,13 @@ export async function generateMetadata({ params }: Props) {
   }
   const c = res.company;
   const where = [c.city, c.state_name].filter(Boolean).join(", ");
-  const desc =
-    c.description?.slice(0, 160) ||
-    `${c.display_name}${where ? `, ${where}` : ""} — supplier profile in the Bharat Manufacturing Directory.`;
+  const cat = c.categories?.[0]?.name;
+  const desc = (
+    c.description ||
+    `${c.display_name}${where ? `, ${where}` : ""}${cat ? `: ${cat.toLowerCase()} supplier` : ""}. Products, capabilities and certifications on Peoplvance.`
+  ).slice(0, 158);
   return pageMetadata({
-    title: where ? `${c.display_name} — ${where}` : c.display_name,
+    title: [c.display_name, cat, where].filter(Boolean).join(" · "),
     description: desc,
     path: `/suppliers/${c.slug}`,
     ogType: "profile",
@@ -195,6 +198,15 @@ export default async function SupplierPage({ params }: Props) {
                   </li>
                 ))}
               </ul>
+              {!!c.locked?.more_products && (
+                <p className="flex items-center gap-2 border-t border-slate-100 pt-2 text-sm text-slate-700">
+                  <LockIcon className="h-4 w-4 text-accent-700" />
+                  <span>
+                    {c.locked.more_products} more product{c.locked.more_products === 1 ? "" : "s"} in the full profile.{" "}
+                    <Link href={accessHref(c.slug)} className="link">Request access</Link>
+                  </span>
+                </p>
+              )}
             </Section>
           )}
 
@@ -232,6 +244,9 @@ export default async function SupplierPage({ params }: Props) {
                   </li>
                 ))}
               </ul>
+              {!!c.locked?.certification_issuers && (
+                <p className="text-xs text-slate-600">Issuing bodies and certificate details are available in the full profile.</p>
+              )}
             </Section>
           )}
 
@@ -248,21 +263,28 @@ export default async function SupplierPage({ params }: Props) {
                   </li>
                 ))}
               </ul>
+              {!!c.locked?.facility_details && (
+                <p className="flex items-center gap-2 text-xs text-slate-600">
+                  <LockIcon className="h-3.5 w-3.5" /> Locality and district are shown in the full profile.
+                </p>
+              )}
             </Section>
           )}
         </div>
 
         <aside className="space-y-6">
-          {(c.legal_name || c.website_url || c.establishment_year) && (
+          {(c.legal_name || c.website_url || c.establishment_year || c.locked?.legal_name || c.locked?.website) && (
             <Section title="Business details" id="facts-h">
               <dl className="space-y-2 text-sm">
-                {c.legal_name && (
+                {c.legal_name ? (
                   <div>
                     <dt className="text-slate-600">Legal name</dt>
                     <dd className="font-medium">{c.legal_name}</dd>
                   </div>
+                ) : (
+                  c.locked?.legal_name && <LockedRow label="Legal name" width="11rem" />
                 )}
-                {c.website_url && (
+                {c.website_url ? (
                   <div>
                     <dt className="text-slate-600">Website</dt>
                     <dd>
@@ -271,6 +293,8 @@ export default async function SupplierPage({ params }: Props) {
                       </a>
                     </dd>
                   </div>
+                ) : (
+                  c.locked?.website && <LockedRow label="Website" width="9rem" />
                 )}
                 {c.establishment_year && (
                   <div>
@@ -319,6 +343,20 @@ export default async function SupplierPage({ params }: Props) {
                 ))}
               </ul>
               <p className="text-xs text-slate-600">Business contact points only. The directory does not publish personal contact details.</p>
+            </Section>
+          )}
+
+          {!c.contacts?.length && !!c.locked?.contacts && (
+            <Section title="Business contacts" id="contacts-h">
+              <dl className="space-y-2 text-sm">
+                {Array.from({ length: Math.min(c.locked.contacts, 3) }, (_, i) => (
+                  <LockedRow key={i} label={i === 0 ? "Sales / enquiries" : "Business contact"} width={i === 0 ? "12rem" : "9rem"} />
+                ))}
+              </dl>
+              <UnlockCta slug={c.slug}>
+                {c.locked.contacts} business contact point{c.locked.contacts === 1 ? "" : "s"} on file. Contact details, website and exact
+                location are shared with genuine buyers on request.
+              </UnlockCta>
             </Section>
           )}
 

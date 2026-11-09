@@ -197,7 +197,7 @@ export function RegistrationForm({ initialOptions }: { initialOptions: Registrat
       <ol className="grid grid-cols-6 gap-1" aria-label="Form progress">
         {STEPS.map((s, i) => (
           <li key={s.id} aria-current={i === step ? "step" : undefined} className="space-y-1">
-            <span className={`block h-1.5 rounded-full ${i <= step ? "bg-accent-700" : "bg-slate-200"}`} aria-hidden="true" />
+            <span className={`block h-1.5 rounded-full ${i <= step ? "bg-primary" : "bg-muted"}`} aria-hidden="true" />
             <span className={`hidden text-xs sm:block ${i === step ? "font-semibold text-slate-900" : "text-slate-600"}`}>{s.title}</span>
             <span className="sr-only">
               Step {i + 1}: {s.title}

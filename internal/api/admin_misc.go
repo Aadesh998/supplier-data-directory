@@ -312,6 +312,57 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+type updateUserBody struct {
+	DisplayName *string `json:"display_name" validate:"omitempty,max=120"`
+	Role        *string `json:"role" validate:"omitempty,oneof=owner admin reviewer"`
+	Active      *bool   `json:"active"`
+}
+
+func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in updateUserBody
+	if err := httpx.Decode(w, r, &in, 8<<10); err != nil {
+		return err
+	}
+	var u store.AdminUser
+	err = s.Store.InTx(r.Context(), func(tx pgx.Tx) error {
+		var err error
+		u, err = store.UpdateAdminUser(r.Context(), tx, s.actor(r), id, store.AdminUserPatch{DisplayName: in.DisplayName, Role: in.Role, Active: in.Active})
+		return err
+	})
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, u)
+	return nil
+}
+
+type resetPasswordBody struct {
+	Password string `json:"password" validate:"required,min=12,max=200"`
+}
+
+func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in resetPasswordBody
+	if err := httpx.Decode(w, r, &in, 8<<10); err != nil {
+		return err
+	}
+	err = s.Store.InTx(r.Context(), func(tx pgx.Tx) error {
+		return store.SetPasswordByID(r.Context(), tx, s.actor(r), id, in.Password)
+	})
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, map[string]any{"ok": true})
+	return nil
+}
+
 // --- discovery ---
 
 func (s *Server) discoveryStatus(w http.ResponseWriter, r *http.Request) error {

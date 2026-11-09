@@ -6,20 +6,20 @@ import type { PageInfo } from "@/lib/types";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: React.ReactNode; actions?: React.ReactNode }) {
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-bold">{title}</h1>
-        {description && <div className="max-w-3xl text-sm text-slate-700">{description}</div>}
+    <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+      <div className="min-w-0 space-y-1">
+        <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
+        {description && <div className="max-w-3xl text-sm text-muted-foreground">{description}</div>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
 
 export function LoadingState({ label = "Loading…" }: { label?: string }) {
   return (
-    <div role="status" className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-6 text-sm text-slate-700">
-      <span aria-hidden="true" className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-accent-700" />
+    <div role="status" className="flex items-center gap-2 rounded-md border bg-card px-4 py-6 text-sm text-muted-foreground">
+      <span aria-hidden="true" className="size-4 animate-spin rounded-full border-2 border-border border-t-primary" />
       {label}
     </div>
   );
@@ -42,7 +42,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
 }
 
 export function EmptyState({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-700">{children}</div>;
+  return <div className="rounded-md border border-dashed bg-card px-4 py-8 text-center text-sm text-muted-foreground">{children}</div>;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -69,7 +69,7 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export function StatusBadge({ status }: { status: string | null | undefined }) {
-  if (!status) return <span className="text-slate-500">—</span>;
+  if (!status) return <span className="text-muted-foreground">—</span>;
   return <span className={`badge ${STATUS_STYLES[status] ?? "border-slate-300 bg-white text-slate-700"}`}>{humanize(status)}</span>;
 }
 
@@ -89,7 +89,7 @@ export function AdminPagination({ page, onPage }: { page: PageInfo | undefined; 
       <button type="button" className="btn-secondary btn-sm" disabled={page.page <= 1} onClick={() => onPage(page.page - 1)}>
         Previous
       </button>
-      <span className="text-slate-700">
+      <span className="text-muted-foreground">
         Page {page.page} of {totalPages} · {page.total} total
       </span>
       <button type="button" className="btn-secondary btn-sm" disabled={!page.has_more} onClick={() => onPage(page.page + 1)}>
@@ -103,7 +103,7 @@ export function Section({ title, children, actions, id }: { title: string; child
   return (
     <section className="card space-y-4" aria-labelledby={id}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id={id} className="text-lg font-semibold">
+        <h2 id={id} className="text-base font-semibold tracking-tight">
           {title}
         </h2>
         {actions}
@@ -114,5 +114,5 @@ export function Section({ title, children, actions, id }: { title: string; child
 }
 
 export function JsonBlock({ value }: { value: unknown }) {
-  return <pre className="max-h-96 overflow-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">{JSON.stringify(value, null, 2)}</pre>;
+  return <pre className="max-h-96 overflow-auto rounded-md border bg-muted p-3 font-mono text-xs text-foreground">{JSON.stringify(value, null, 2)}</pre>;
 }

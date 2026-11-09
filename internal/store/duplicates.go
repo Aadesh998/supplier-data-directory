@@ -16,6 +16,7 @@ type CandidateKey struct {
 	NormalizedName string
 	Domain         string
 	City           string
+	GSTIN          string
 	ContactHashes  []string
 }
 
@@ -32,29 +33,31 @@ const DuplicateThreshold = 0.6
 
 // FindCandidates returns likely duplicates. Matching never merges anything by itself.
 func FindCandidates(ctx context.Context, q DBTX, k CandidateKey) ([]Candidate, error) {
-	if k.NormalizedName == "" && k.Domain == "" && len(k.ContactHashes) == 0 {
+	if k.NormalizedName == "" && k.Domain == "" && k.GSTIN == "" && len(k.ContactHashes) == 0 {
 		return nil, nil
 	}
 	type row struct {
 		id, name             string
 		sim                  float64
 		sameDomain, sameCont bool
-		sameCity             bool
+		sameCity, sameGSTIN  bool
 	}
 	rows, err := collect(ctx, q, `SELECT o.id, o.display_name,
 			similarity(o.normalized_name, $1) AS sim,
 			($2 <> '' AND o.website_domain = $2) AS same_domain,
 			EXISTS (SELECT 1 FROM contacts y WHERE y.company_id = o.id AND y.deleted_at IS NULL AND y.value_hash = ANY($3)) AS same_contact,
-			($4 <> '' AND EXISTS (SELECT 1 FROM facilities fb WHERE fb.company_id = o.id AND fb.deleted_at IS NULL AND lower(fb.city) = lower($4))) AS same_city
+			($4 <> '' AND EXISTS (SELECT 1 FROM facilities fb WHERE fb.company_id = o.id AND fb.deleted_at IS NULL AND lower(fb.city) = lower($4))) AS same_city,
+			($6 <> '' AND o.gstin = $6) AS same_gstin
 		FROM companies o
 		WHERE o.deleted_at IS NULL AND ($5 = '' OR o.id <> $5::uuid)
 		  AND (($1 <> '' AND o.normalized_name % $1)
 		       OR ($2 <> '' AND o.website_domain = $2)
+		       OR ($6 <> '' AND o.gstin = $6)
 		       OR EXISTS (SELECT 1 FROM contacts y WHERE y.company_id = o.id AND y.deleted_at IS NULL AND y.value_hash = ANY($3)))
 		ORDER BY sim DESC LIMIT 10`, func(r pgx.Rows) (row, error) {
 		var x row
-		return x, r.Scan(&x.id, &x.name, &x.sim, &x.sameDomain, &x.sameCont, &x.sameCity)
-	}, k.NormalizedName, k.Domain, k.ContactHashes, k.City, k.ExcludeID)
+		return x, r.Scan(&x.id, &x.name, &x.sim, &x.sameDomain, &x.sameCont, &x.sameCity, &x.sameGSTIN)
+	}, k.NormalizedName, k.Domain, k.ContactHashes, k.City, k.ExcludeID, k.GSTIN)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +71,10 @@ func FindCandidates(ctx context.Context, q DBTX, k CandidateKey) ([]Candidate, e
 		if r.sameDomain {
 			score = math.Max(score, 0.95)
 			reasons = append(reasons, "same website domain")
+		}
+		if r.sameGSTIN {
+			score = math.Max(score, 0.98)
+			reasons = append(reasons, "same GSTIN")
 		}
 		if r.sameCont {
 			score = math.Max(score, 0.9)
@@ -87,12 +94,12 @@ func FindCandidates(ctx context.Context, q DBTX, k CandidateKey) ([]Candidate, e
 
 func companyKey(ctx context.Context, q DBTX, id string) (CandidateKey, error) {
 	k := CandidateKey{ExcludeID: id}
-	var domain, city *string
-	err := q.QueryRow(ctx, `SELECT c.normalized_name, c.website_domain,
+	var domain, city, gstin *string
+	err := q.QueryRow(ctx, `SELECT c.normalized_name, c.website_domain, c.gstin,
 		(SELECT city FROM facilities WHERE company_id = c.id AND deleted_at IS NULL ORDER BY is_primary DESC LIMIT 1),
 		COALESCE((SELECT array_agg(value_hash) FROM contacts WHERE company_id = c.id AND deleted_at IS NULL AND contact_type <> 'individual'), '{}')
-		FROM companies c WHERE c.id = $1`, id).Scan(&k.NormalizedName, &domain, &city, &k.ContactHashes)
-	k.Domain, k.City = deref(domain), deref(city)
+		FROM companies c WHERE c.id = $1`, id).Scan(&k.NormalizedName, &domain, &gstin, &city, &k.ContactHashes)
+	k.Domain, k.City, k.GSTIN = deref(domain), deref(city), deref(gstin)
 	return k, err
 }
 

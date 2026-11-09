@@ -7,8 +7,8 @@ import type { CategoryNode } from "@/lib/types";
 
 export async function generateMetadata() {
   return pageMetadata({
-    title: "Industries",
-    description: "Browse Indian manufacturing and industrial supply categories, from food processing and textiles to CNC machining and sourcing.",
+    title: "Browse Industries: Manufacturers by Sector",
+    description: "Browse Indian manufacturers and suppliers by industry: food processing, textiles, ceramics and tiles, building materials, CNC machining, chemicals, packaging and more.",
     path: "/industries",
   });
 }

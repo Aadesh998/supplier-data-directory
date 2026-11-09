@@ -87,9 +87,16 @@ func (s *Server) createImport(w http.ResponseWriter, r *http.Request) error {
 			return httpx.FieldErrors(map[string]string{"column_mapping": "must be a JSON object"})
 		}
 	}
+	in.Defer = isTrue(r.FormValue("async"))
 	job, err := s.Store.CreateImport(r.Context(), s.actor(r), in)
 	if err != nil {
 		return translate(err)
+	}
+	if job.Task != nil {
+		// Large files: rows are normalised and checked for duplicates in the background.
+		go s.Store.RunImportTask(s.actor(r), job.ID, "process", false)
+		httpx.JSON(w, http.StatusAccepted, job)
+		return nil
 	}
 	httpx.JSON(w, http.StatusCreated, job)
 	return nil
@@ -151,7 +158,10 @@ func (s *Server) updateImportRow(w http.ResponseWriter, r *http.Request) error {
 
 type mappingBody struct {
 	ColumnMapping map[string]string `json:"column_mapping" validate:"required"`
+	Async         bool              `json:"async"`
 }
+
+func isTrue(v string) bool { return v == "1" || strings.EqualFold(v, "true") }
 
 func (s *Server) remapImport(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r, "id")
@@ -162,9 +172,14 @@ func (s *Server) remapImport(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.Decode(w, r, &in, 32<<10); err != nil {
 		return err
 	}
-	j, err := s.Store.RemapImport(r.Context(), s.actor(r), id, in.ColumnMapping)
+	j, err := s.Store.RemapImport(r.Context(), s.actor(r), id, in.ColumnMapping, in.Async)
 	if err != nil {
 		return translate(err)
+	}
+	if in.Async {
+		go s.Store.RunImportTask(s.actor(r), id, "process", false)
+		httpx.JSON(w, http.StatusAccepted, j)
+		return nil
 	}
 	httpx.JSON(w, 200, j)
 	return nil
@@ -173,6 +188,8 @@ func (s *Server) remapImport(w http.ResponseWriter, r *http.Request) error {
 type commitBody struct {
 	DryRun              *bool `json:"dry_run"`
 	IncludeCleanPending bool  `json:"include_clean_pending"`
+	// Async runs the dry run / commit in the background; poll GET /imports/{id} for task_result.
+	Async bool `json:"async"`
 }
 
 func (s *Server) commitImport(w http.ResponseWriter, r *http.Request) error {
@@ -187,6 +204,19 @@ func (s *Server) commitImport(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	dry := in.DryRun == nil || *in.DryRun // dry run unless explicitly false
+	if in.Async {
+		task := map[bool]string{true: "dry_run", false: "commit"}[dry]
+		if err := store.ClaimImportTask(r.Context(), s.Store.Pool, id, task); err != nil {
+			return translate(err)
+		}
+		go s.Store.RunImportTask(s.actor(r), id, task, in.IncludeCleanPending)
+		j, err := store.GetImportJob(r.Context(), s.Store.Pool, id)
+		if err != nil {
+			return err
+		}
+		httpx.JSON(w, http.StatusAccepted, j)
+		return nil
+	}
 	res, err := s.Store.CommitImport(r.Context(), s.actor(r), id, dry, in.IncludeCleanPending)
 	if err != nil {
 		return translate(err)

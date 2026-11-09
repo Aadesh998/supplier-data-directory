@@ -22,16 +22,15 @@ function MappingEditor({ job }: { job: ImportJob }) {
   const save = useMutation({
     mutationFn: () => {
       const clean = Object.fromEntries(Object.entries(mapping).filter(([, v]) => v));
-      return api.post<ImportJob>(`/admin/imports/${job.id}/mapping`, { column_mapping: clean });
+      return api.post<ImportJob>(`/admin/imports/${job.id}/mapping`, { column_mapping: clean, async: true });
     },
     onSuccess: (j) => {
       qc.setQueryData(["admin", "import", job.id], j);
-      void qc.invalidateQueries({ queryKey: ["admin", "import-rows", job.id] });
-      toast.success("Mapping applied; rows re-normalised.");
+      toast.success("Mapping saved; re-checking rows in the background.");
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
-  const editable = job.status === "staged" || job.status === "uploaded";
+  const editable = (job.status === "staged" || job.status === "uploaded") && !job.task;
   const headers = job.headers ?? [];
 
   return (
@@ -88,7 +87,7 @@ function RowsTable({ job }: { job: ImportJob }) {
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const q = useQuery({
-    queryKey: ["admin", "import-rows", job.id, filter, disposition, page],
+    queryKey: ["admin", "import-rows", job.id, filter, disposition, page, job.task_finished_at ?? ""],
     queryFn: () => api.get<Paginated<ImportRow>>(`/admin/imports/${job.id}/rows`, { filter, disposition, page, limit: 50 }),
     placeholderData: keepPreviousData,
   });
@@ -334,21 +333,25 @@ function CommitPanel({ job }: { job: ImportJob }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [includeClean, setIncludeClean] = useState(false);
-  const [preview, setPreview] = useState<CommitResult | null>(null);
-  const [result, setResult] = useState<CommitResult | null>(null);
+  // The task launched from this page (dry run or commit) and when, so its outcome can be derived
+  // from the polled job without effects.
+  const [launched, setLaunched] = useState<{ task: "dry_run" | "commit"; at: string } | null>(null);
+
+  const finishedAfterLaunch =
+    !!launched && !job.task && !!job.task_finished_at && job.task_finished_at >= launched.at;
+  const outcome = finishedAfterLaunch ? (job.task_result as CommitResult | null) : null;
+  const preview = launched?.task === "dry_run" && outcome?.dry_run ? outcome : null;
+  const result = launched?.task === "commit" && outcome && !outcome.dry_run ? outcome : null;
+  const running = !!job.task;
 
   const commit = useMutation({
-    mutationFn: (dryRun: boolean) => api.post<CommitResult>(`/admin/imports/${job.id}/commit`, { dry_run: dryRun, include_clean_pending: includeClean }),
-    onSuccess: (r) => {
-      if (r.dry_run) setPreview(r);
-      else {
-        setResult(r);
-        setPreview(null);
-        toast.success(`Committed: ${r.created} created, ${r.merged} merged.`);
-        void qc.invalidateQueries({ queryKey: ["admin", "import", job.id] });
-        void qc.invalidateQueries({ queryKey: ["admin", "import-rows", job.id] });
-        void qc.invalidateQueries({ queryKey: ["admin", "imports"] });
-      }
+    mutationFn: (dryRun: boolean) =>
+      api.post<ImportJob>(`/admin/imports/${job.id}/commit`, { dry_run: dryRun, include_clean_pending: includeClean, async: true }),
+    onSuccess: (j, dryRun) => {
+      setLaunched({ task: dryRun ? "dry_run" : "commit", at: j.task_started_at ?? new Date().toISOString() });
+      qc.setQueryData(["admin", "import", job.id], j);
+      void qc.invalidateQueries({ queryKey: ["admin", "imports"] });
+      if (!dryRun) toast.success("Commit started. It runs on the server; you can leave this page.");
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -382,26 +385,26 @@ function CommitPanel({ job }: { job: ImportJob }) {
               checked={includeClean}
               onChange={(e) => {
                 setIncludeClean(e.target.checked);
-                setPreview(null);
+                setLaunched(null);
               }}
             />
             <span>Also create pending rows that have no errors and no duplicate candidates</span>
           </label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secondary" disabled={commit.isPending} onClick={() => commit.mutate(true)}>
-              Preview (dry run)
+            <button type="button" className="btn-secondary" disabled={commit.isPending || running} onClick={() => commit.mutate(true)}>
+              {job.task === "dry_run" ? "Previewing…" : "Preview (dry run)"}
             </button>
             <button
               type="button"
               className="btn-primary"
-              disabled={commit.isPending || !preview}
+              disabled={commit.isPending || running || !preview}
               title={!preview ? "Run a dry-run preview first" : undefined}
               onClick={() => window.confirm("Commit this import? Companies will be created as private records.") && commit.mutate(false)}
             >
               Commit import
             </button>
           </div>
-          {!preview && <p className="hint">Run a preview first to see what will happen.</p>}
+          {!preview && !running && <p className="hint">Run a preview first to see what will happen.</p>}
           {preview && <ResultView r={preview} />}
         </>
       ) : (
@@ -422,10 +425,44 @@ function CommitPanel({ job }: { job: ImportJob }) {
   );
 }
 
+const TASK_TEXT = {
+  process: "Checking rows: normalising values and looking for duplicates",
+  dry_run: "Running the dry-run preview",
+  commit: "Committing rows",
+} as const;
+
+function TaskBanner({ job }: { job: ImportJob }) {
+  if (job.task) {
+    return (
+      <div role="status" aria-live="polite" className="flex items-center gap-3 rounded-md border border-accent-200 bg-accent-50 px-4 py-3 text-sm">
+        <span aria-hidden="true" className="size-4 shrink-0 animate-spin rounded-full border-2 border-accent-600 border-t-transparent" />
+        <span>
+          <strong className="font-semibold">{TASK_TEXT[job.task]}…</strong> {job.task_started_at && <>Started {formatDateTime(job.task_started_at)}.</>} This runs on
+          the server: you can leave this page and come back. Large files against a remote database can take several minutes.
+        </span>
+      </div>
+    );
+  }
+  if (job.task_error) {
+    return (
+      <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+        <strong className="font-semibold">The last operation did not complete:</strong> {job.task_error}
+      </p>
+    );
+  }
+  return null;
+}
+
 export default function ImportDetailPage() {
   const { id } = useParams<{ id: string }>();
   const api = useApi();
-  const q = useQuery({ queryKey: ["admin", "import", id], queryFn: () => api.get<ImportJob>(`/admin/imports/${id}`), enabled: !!id });
+  const q = useQuery({
+    queryKey: ["admin", "import", id],
+    queryFn: () => api.get<ImportJob>(`/admin/imports/${id}`),
+    enabled: !!id,
+    // Poll while a background task runs.
+    refetchInterval: (query) => (query.state.data?.task ? 2000 : false),
+  });
   if (q.isLoading) return <LoadingState />;
   if (q.error) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const job = q.data;
@@ -446,6 +483,7 @@ export default function ImportDetailPage() {
           </a>
         }
       />
+      <TaskBanner job={job} />
       <Section title="Summary" id="sum-h">
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
           <div>

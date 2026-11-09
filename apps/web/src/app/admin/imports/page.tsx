@@ -13,6 +13,8 @@ import { ApiError, errorMessage } from "@/lib/api-error";
 import { formatDateTime } from "@/lib/labels";
 import type { ImportJob, Paginated } from "@/lib/types";
 
+const TASK_LABEL = { process: "checking rows…", dry_run: "previewing…", commit: "committing…" } as const;
+
 function UploadForm() {
   const api = useApi();
   const toast = useToast();
@@ -28,7 +30,9 @@ function UploadForm() {
   const upload = useMutation({
     mutationFn: (fd: FormData) => api.request<ImportJob>("POST", "/admin/imports", { body: fd }),
     onSuccess: (job) => {
-      toast.success(`Uploaded ${job.filename}: ${job.total_rows} rows staged.`);
+      toast.success(
+        job.task ? `Uploaded ${job.filename}: checking ${job.total_rows} rows in the background…` : `Uploaded ${job.filename}: ${job.total_rows} rows staged.`,
+      );
       void qc.invalidateQueries({ queryKey: ["admin", "imports"] });
       router.push(`/admin/imports/${job.id}`);
     },
@@ -48,6 +52,9 @@ function UploadForm() {
     if (!declared) return setError("Confirm the data-origin declaration.");
     const fd = new FormData();
     fd.append("file", file);
+    // Rows are normalised and checked for duplicates on the server in the background, so large
+    // files are never cut off by request timeouts.
+    fd.append("async", "1");
     if (mode === "existing") fd.append("source_id", sourceId);
     else fd.append("source", JSON.stringify(sourceInputFromForm(source)));
     upload.mutate(fd);
@@ -64,7 +71,7 @@ function UploadForm() {
           CSV file <span className="text-red-700">*</span>
         </label>
         <input id="imp-file" type="file" accept=".csv,text/csv" className="input" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        <p className="hint">Max 10 MB and 20,000 rows. The first row must contain column headers.</p>
+        <p className="hint">Max 10 MB and 20,000 rows. The first row must contain column headers. Large files are processed in the background; you can leave the page.</p>
       </div>
       <fieldset className="space-y-3">
         <legend className="label">
@@ -145,6 +152,7 @@ export default function ImportsPage() {
                       </td>
                       <td>
                         <StatusBadge status={j.status} />
+                        {j.task && <span className="ml-1 text-xs text-accent-700">· {TASK_LABEL[j.task]}</span>}
                       </td>
                       <td className="tabular-nums">{j.total_rows}</td>
                       <td className="tabular-nums">{j.error_rows}</td>

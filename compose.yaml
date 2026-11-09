@@ -4,11 +4,12 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-bharatmfg}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
-      POSTGRES_DB: ${POSTGRES_DB:-bharatmfg}
+      # LOCAL_PG_* (not POSTGRES_*) so a remote database's settings in .env never leak into this container.
+      POSTGRES_USER: ${LOCAL_PG_USER:-bharatmfg}
+      POSTGRES_PASSWORD: ${LOCAL_PG_PASSWORD:-devpassword}
+      POSTGRES_DB: ${LOCAL_PG_DB:-bharatmfg}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5434}:5432"
+      - "127.0.0.1:${LOCAL_PG_PORT:-5434}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
@@ -32,11 +33,13 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-bharatmfg}:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/${POSTGRES_DB:-bharatmfg}?sslmode=disable
+      # Local container by default. Set API_DATABASE_URL (+ DATABASE_SCHEMA) in .env to use a remote database.
+      DATABASE_URL: ${API_DATABASE_URL:-postgres://${LOCAL_PG_USER:-bharatmfg}:${LOCAL_PG_PASSWORD:-devpassword}@postgres:5432/${LOCAL_PG_DB:-bharatmfg}?sslmode=disable}
+      DATABASE_SCHEMA: ${DATABASE_SCHEMA:-}
       HTTP_ADDR: ":8080"
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
-      MAIL_FROM: "Bharat Manufacturing Directory <no-reply@localhost.test>"
+      MAIL_FROM: "Peoplvance <no-reply@localhost.test>"
       MIGRATE_ON_START: "true"
       # The API port is bound to localhost; only the web container (trusted proxy) reaches it.
       TRUST_PROXY_HEADERS: "true"
@@ -64,6 +67,7 @@ services:
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
       NEXT_PUBLIC_ALLOW_INDEXING: ${NEXT_PUBLIC_ALLOW_INDEXING:-false}
       NEXT_PUBLIC_PRIVACY_EMAIL: ${NEXT_PUBLIC_PRIVACY_EMAIL:-privacy@example.com}
+      NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL:-}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
     depends_on:
       api:

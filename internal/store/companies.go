@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/bharatmfg/directory/internal/normalize"
 )
@@ -116,6 +118,7 @@ type AdminCompany struct {
 	NormalizedName        string              `json:"normalized_name"`
 	Description           *string             `json:"description"`
 	WebsiteURL            *string             `json:"website_url"`
+	GSTIN                 *string             `json:"gstin"`
 	EstablishmentYear     *int16              `json:"establishment_year"`
 	BusinessStatus        string              `json:"business_status"`
 	PrimaryCategoryID     *string             `json:"primary_category_id"`
@@ -225,9 +228,9 @@ func (s *Store) GetAdminCompany(ctx context.Context, q DBTX, id string) (AdminCo
 		return c, err
 	}
 	c.AdminCompanySummary = sum
-	err = q.QueryRow(ctx, `SELECT normalized_name, description, website_url, establishment_year, business_status,
+	err = q.QueryRow(ctx, `SELECT normalized_name, description, website_url, gstin, establishment_year, business_status,
 		primary_category_id, published_at, last_verified_at, next_review_at, public_listing_withdrawn_at, commercial_api_withdrawn_at
-		FROM companies WHERE id = $1`, id).Scan(&c.NormalizedName, &c.Description, &c.WebsiteURL, &c.EstablishmentYear,
+		FROM companies WHERE id = $1`, id).Scan(&c.NormalizedName, &c.Description, &c.WebsiteURL, &c.GSTIN, &c.EstablishmentYear,
 		&c.BusinessStatus, &c.PrimaryCategoryID, &c.PublishedAt, &c.LastVerifiedAt, &c.NextReviewAt,
 		&c.PublicWithdrawnAt, &c.CommercialWithdrawnAt)
 	if err != nil {
@@ -401,6 +404,7 @@ type CompanyInput struct {
 	LegalName         *string   `json:"legal_name" validate:"omitempty,max=300"`
 	Description       *string   `json:"description" validate:"omitempty,max=5000"`
 	WebsiteURL        *string   `json:"website_url" validate:"omitempty,max=500"`
+	GSTIN             *string   `json:"gstin" validate:"omitempty,max=20"`
 	EstablishmentYear *int      `json:"establishment_year" validate:"omitempty,gte=1800,lte=2100"`
 	BusinessStatus    *string   `json:"business_status" validate:"omitempty,oneof=active inactive closed unknown"`
 	PrimaryCategoryID *string   `json:"primary_category_id" validate:"omitempty,uuid"`
@@ -424,10 +428,34 @@ func (in CompanyInput) dataFields() []string {
 	if in.WebsiteURL != nil {
 		f = append(f, "website_url")
 	}
+	if in.GSTIN != nil {
+		f = append(f, "gstin")
+	}
 	if in.EstablishmentYear != nil {
 		f = append(f, "establishment_year")
 	}
 	return f
+}
+
+// cleanGSTIN validates an optional GSTIN; an empty string clears it.
+func cleanGSTIN(v *string) (*string, error) {
+	if v == nil || strings.TrimSpace(*v) == "" {
+		return nil, nil
+	}
+	g, ok := normalize.GSTIN(*v)
+	if !ok {
+		return nil, ErrInvalid{Msg: "invalid GSTIN", Fields: map[string]string{"gstin": "must be a valid 15-character GSTIN"}}
+	}
+	return &g, nil
+}
+
+// gstinConflict turns a unique-GSTIN violation into a readable conflict.
+func gstinConflict(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "companies_gstin_key" {
+		return ErrConflict{Msg: "another company already has this GSTIN; merge the records instead"}
+	}
+	return err
 }
 
 // uniqueSlug returns base, or base-2, base-3... that is not used by a company or redirect.
@@ -520,16 +548,23 @@ func createCompanyTx(ctx context.Context, tx DBTX, a Actor, in CompanyInput, sta
 	if in.BusinessStatus != nil {
 		bs = *in.BusinessStatus
 	}
-	var id string
-	err = tx.QueryRow(ctx, `INSERT INTO companies (display_name, legal_name, slug, normalized_name, description,
-		website_url, website_domain, establishment_year, business_status, publication_status, primary_category_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-		name, legal, slug, normalize.CompanyName(name), desc, url, domain, in.EstablishmentYear, bs, status,
-		in.PrimaryCategoryID).Scan(&id)
+	gstin, err := cleanGSTIN(in.GSTIN)
 	if err != nil {
 		return "", err
 	}
+	var id string
+	err = tx.QueryRow(ctx, `INSERT INTO companies (display_name, legal_name, slug, normalized_name, description,
+		website_url, website_domain, establishment_year, business_status, publication_status, primary_category_id, gstin)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+		name, legal, slug, normalize.CompanyName(name), desc, url, domain, in.EstablishmentYear, bs, status,
+		in.PrimaryCategoryID, gstin).Scan(&id)
+	if err != nil {
+		return "", gstinConflict(err)
+	}
 	fields := []string{"display_name"}
+	if gstin != nil {
+		fields = append(fields, "gstin")
+	}
 	if legal != nil {
 		fields = append(fields, "legal_name")
 	}
@@ -619,6 +654,13 @@ func (s *Store) UpdateCompany(ctx context.Context, a Actor, id string, in Compan
 			set("website_url", u)
 			set("website_domain", d)
 		}
+		if in.GSTIN != nil {
+			g, err := cleanGSTIN(in.GSTIN)
+			if err != nil {
+				return err
+			}
+			set("gstin", g)
+		}
 		if in.EstablishmentYear != nil {
 			set("establishment_year", *in.EstablishmentYear)
 		}
@@ -646,7 +688,7 @@ func (s *Store) UpdateCompany(ctx context.Context, a Actor, id string, in Compan
 		}
 		if len(sets) > 0 {
 			if _, err := tx.Exec(ctx, "UPDATE companies SET "+strings.Join(sets, ", ")+" WHERE id = $1 AND deleted_at IS NULL", args...); err != nil {
-				return err
+				return gstinConflict(err)
 			}
 		}
 		if len(fields) > 0 {

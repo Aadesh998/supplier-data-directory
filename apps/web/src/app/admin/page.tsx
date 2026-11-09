@@ -41,8 +41,8 @@ function Breakdown({ title, data }: { title: string; data: Record<string, number
                 </th>
                 <td className="py-1.5 text-right font-medium tabular-nums">{n}</td>
                 <td className="w-1/3 py-1.5 pl-3">
-                  <div className="h-2 rounded bg-slate-100" aria-hidden="true">
-                    <div className="h-2 rounded bg-accent-600" style={{ width: `${total ? (n / total) * 100 : 0}%` }} />
+                  <div className="h-2 rounded bg-muted" aria-hidden="true">
+                    <div className="h-2 rounded bg-primary" style={{ width: `${total ? (n / total) * 100 : 0}%` }} />
                   </div>
                 </td>
               </tr>

@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Bharat Manufacturing Directory API
+  title: Peoplvance API
   version: 1.0.0
   description: |
-    Internal REST API for the Bharat Manufacturing Directory MVP.
+    Internal REST API for Peoplvance MVP.
 
     * Public endpoints return **only** published companies and **only** fields whose
       provenance permits public display. Personal contacts are never returned.

@@ -117,3 +117,20 @@ func TestNormalizeRowMissingName(t *testing.T) {
 		t.Fatalf("errors = %v", r.Errors)
 	}
 }
+
+func TestGSTINNormalisedAndFillsMissingState(t *testing.T) {
+	headers := []string{"Company name", "GSTIN", "City", "State"}
+	m := AutoMap(headers)
+	if m["gstin"] != "GSTIN" {
+		t.Fatalf("gstin not auto-mapped: %v", m)
+	}
+	res := NormalizeRow(map[string]string{"Company name": "Bharat Wool", "GSTIN": " 06adzps1327c1ze ", "City": "Panipat"}, m, lk)
+	if res.Normalized.GSTIN != "06ADZPS1327C1ZE" || res.Normalized.Facility.StateCode != "HR" {
+		t.Fatalf("gstin=%q state=%q", res.Normalized.GSTIN, res.Normalized.Facility.StateCode)
+	}
+	// An explicit state wins over the GSTIN prefix; a malformed GSTIN is dropped with a warning.
+	res = NormalizeRow(map[string]string{"Company name": "X Traders", "GSTIN": "06AN0PA1521FZK", "State": "Delhi"}, m, lk)
+	if res.Normalized.GSTIN != "" || res.Normalized.Facility.StateCode != "DL" || len(res.Warnings) == 0 {
+		t.Fatalf("got %+v warnings=%v", res.Normalized, res.Warnings)
+	}
+}

@@ -287,8 +287,24 @@ func TestSubmissionToPublicationFlow(t *testing.T) {
 			t.Fatalf("public profile leaks %q: %s", leak, body)
 		}
 	}
-	if !strings.Contains(string(body), "sales@gujaratglazeworks.example") || !strings.Contains(string(body), "Morbi") {
+	if !strings.Contains(string(body), "Morbi") || !strings.Contains(string(body), "Glazed tile") {
 		t.Fatalf("public profile missing permitted fields: %s", body)
+	}
+	// Open-web profiles are teasers: contact points and website are withheld, only counted.
+	for _, locked := range []string{"sales@gujaratglazeworks.example", "gujaratglazeworks.example", "363641"} {
+		if strings.Contains(string(body), locked) {
+			t.Fatalf("public profile exposes locked detail %q: %s", locked, body)
+		}
+	}
+	var teaser struct {
+		Locked struct {
+			Contacts int  `json:"contacts"`
+			Website  bool `json:"website"`
+		} `json:"locked"`
+	}
+	_ = json.Unmarshal(body, &teaser)
+	if teaser.Locked.Contacts != 1 || !teaser.Locked.Website {
+		t.Fatalf("locked summary = %+v", teaser.Locked)
 	}
 	var search struct {
 		Data []struct{ Slug string } `json:"data"`

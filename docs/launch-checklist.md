@@ -13,7 +13,7 @@
 - [ ] Decide on business registration and GST when you start selling.
 
 ## Product
-- [ ] Brand and domain chosen. "Bharat Manufacturing Directory" is a working name, not a trademark claim.
+- [ ] Brand and domain chosen. "Peoplvance" is a working name, not a trademark claim.
 - [ ] Dedicated business email and privacy contact (`PRIVACY_EMAIL`).
 - [ ] SMTP configured; test every email template via Mailpit, then in production.
 - [ ] Remove or never load the synthetic seed in production (it is private by default; `seed --demo` is refused in production).

@@ -92,3 +92,24 @@ func TestEmailAndPin(t *testing.T) {
 		t.Errorf("PostalCode = %q %v", p, ok)
 	}
 }
+
+func TestGSTIN(t *testing.T) {
+	cases := map[string]string{
+		"06ABTFA5899D1ZW":    "06ABTFA5899D1ZW",
+		" 06adzps1327c1ze ":  "06ADZPS1327C1ZE",
+		"06 ABTFA 5899 D1ZW": "06ABTFA5899D1ZW",
+		"066AACCK3866B1ZS":   "", // 16 chars
+		"06AN0PA1521FZK":     "", // malformed
+		"99ABTFA5899D1ZW":    "", // unknown state
+		"":                   "",
+	}
+	for in, want := range cases {
+		got, ok := GSTIN(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("GSTIN(%q) = %q,%v want %q", in, got, ok, want)
+		}
+	}
+	if s, ok := StateFromGSTIN("09AAAAA0000A1Z5"); !ok || s != "UP" {
+		t.Errorf("StateFromGSTIN = %q", s)
+	}
+}

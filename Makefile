@@ -1,10 +1,11 @@
-# Bharat Manufacturing Directory — developer commands.
+# Peoplvance — developer commands.
 SHELL := /bin/bash
 GO_PKGS := ./apps/api/... ./internal/... ./db/... ./packages/...
 -include .env
 export
 # Tests create throwaway databases via the bharatmfg_test maintenance DB (see infra/postgres/init-test-db.sql).
-TEST_DATABASE_URL ?= postgres://$(or $(POSTGRES_USER),bharatmfg):$(or $(POSTGRES_PASSWORD),devpassword)@localhost:$(or $(POSTGRES_PORT),5434)/bharatmfg_test?sslmode=disable
+# Always the LOCAL container (LOCAL_PG_*), never DATABASE_URL: tests create and drop databases.
+TEST_DATABASE_URL ?= postgres://$(or $(LOCAL_PG_USER),bharatmfg):$(or $(LOCAL_PG_PASSWORD),devpassword)@localhost:$(or $(LOCAL_PG_PORT),5434)/bharatmfg_test?sslmode=disable
 export TEST_DATABASE_URL
 
 .PHONY: help up down db-up db-down migrate migrate-down migrate-status reset seed seed-demo admin run web \

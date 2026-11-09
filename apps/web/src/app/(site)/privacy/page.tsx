@@ -7,7 +7,7 @@ import { pageMetadata } from "@/lib/seo";
 export async function generateMetadata() {
   return pageMetadata({
     title: "Privacy notice",
-    description: "How the Bharat Manufacturing Directory collects, uses, stores and protects information, and how to exercise your choices.",
+    description: "How Peoplvance collects, uses, stores and protects information, and how to exercise your choices.",
     path: "/privacy",
   });
 }
@@ -18,7 +18,7 @@ export default function PrivacyPage() {
     <StaticPage title="Privacy notice" path="/privacy" draft lead={`Version ${PRIVACY_NOTICE_VERSION}. This notice explains what we collect, why, and the choices you have.`}>
       <h2>Who we are</h2>
       <p>
-        The Bharat Manufacturing Directory (working name) is operated by an independent founder during a beta period. It is not yet a
+        Peoplvance (peoplvance.org) is operated by an independent founder during a beta period. It is not yet a
         registered company. Contact for privacy matters: <a href={`mailto:${email}`}>{email}</a>.
       </p>
 

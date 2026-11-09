@@ -13,7 +13,7 @@
 | **CSRF** | Per-session token in `X-CSRF-Token` on every admin mutation, plus Origin/Referer allowlist | — |
 | **Privilege misuse** | RBAC (reviewer/admin/owner); owner-only for source permission changes, commercial exports, erasure, user management; every mutation and every view of submitter personal data is audit-logged; audit log is append-only at the database level | — |
 | **Data leakage** | Publication gate in code and in a DB trigger; field-level permission filtering on every public response and export; personal contacts encrypted (AES-256-GCM) and masked even in admin views; submitter email kept out of JSON payloads; request logs omit query strings and bodies; audit snapshots redact personal keys | — |
-| **Scraping of our own pages** | Per-IP limits on public API (120/min); page depth capped at 500; result totals capped at 10,000; public responses cacheable for 60 s only | Bot management at the CDN if needed |
+| **Scraping of our own pages** | Per-IP limits on public API (120/min); page depth capped at 500; result totals capped at 10,000; public responses cacheable for 60 s only. Public profiles are teasers: contacts, website, legal name, locality, certificate issuers and products beyond 3 are stripped server-side. | Bot management at the CDN if needed |
 | **Rate-limit evasion via spoofed IPs** | API trusts `X-Forwarded-For` only when `TRUST_PROXY_HEADERS=true`. Production puts Caddy in front, which discards client-supplied XFF (verified: spoofed headers still hit the limit). | Locally, without Caddy, the limit can be bypassed; account lockout still applies |
 | **Worker API misuse** | `/api/v1/worker/*` disabled unless `WORKER_TOKEN` (≥32 chars) is set; constant-time bearer check; jobs are leased to a worker id, so a stale or foreign worker cannot complete them; result payloads capped (2,000 items, 8 MB); OSM tags allowlisted; Google content rejected by the DB | Rotate `WORKER_TOKEN` if it leaks (`wrangler secret put` + redeploy) |
 | **Server-side render throttling** | Web server sends `INTERNAL_API_TOKEN` on its own API calls, so page renders don't share one IP bucket; the browser proxy never forwards that header | Keep the token secret; rotate like any secret |
@@ -29,6 +29,7 @@
 | Submitter email | `supplier_submissions.submitter_email_encrypted` | AES-256-GCM + HMAC lookup | Admins (decrypted on the detail view, audit-logged) |
 | Individual contacts | `contacts` (`individual`) | Encrypted, masked in UI, never public or exported | Masked to admins |
 | Privacy requester email | `deletion_requests.requester_email_encrypted` | Encrypted | Admins |
+| GSTIN (may embed a proprietor's PAN) | `companies.gstin` | Never in public/commercial responses or exports | Admins |
 | IP addresses | `submitter_ip_hash`, `admin_sessions.ip_hash` | HMAC pseudonym only | — |
 
 ## Data subject rights workflow

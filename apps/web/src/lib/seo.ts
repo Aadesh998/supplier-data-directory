@@ -22,7 +22,7 @@ export function pageMetadata({ title, description, path, noindex, ogType = "webs
     description,
     alternates: { canonical: url },
     openGraph: { title, description, url, siteName: SITE_NAME, type: ogType === "profile" ? "profile" : "website", locale: "en_IN" },
-    twitter: { card: "summary", title, description },
+    twitter: { card: "summary_large_image", title, description },
     // Thin or synthetic pages: keep out of the index but let crawlers follow links (production only).
     robots: index ? { index: true, follow: true } : { index: false, follow: indexingAllowed() },
   };

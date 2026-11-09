@@ -33,8 +33,14 @@ type ImportJob struct {
 	CommittedRows int               `json:"committed_rows"`
 	Errors        []any             `json:"errors"`
 	Source        DataSource        `json:"source"`
-	CreatedAt     time.Time         `json:"created_at"`
-	CommittedAt   *time.Time        `json:"committed_at"`
+	// Background task state (see RunImportTask): task is non-null while work is running.
+	Task           *string         `json:"task"`
+	TaskStartedAt  *time.Time      `json:"task_started_at"`
+	TaskFinishedAt *time.Time      `json:"task_finished_at"`
+	TaskResult     json.RawMessage `json:"task_result"`
+	TaskError      *string         `json:"task_error"`
+	CreatedAt      time.Time       `json:"created_at"`
+	CommittedAt    *time.Time      `json:"committed_at"`
 }
 
 // ImportRow mirrors import_rows.
@@ -58,9 +64,11 @@ func GetImportJob(ctx context.Context, q DBTX, id string) (ImportJob, error) {
 	var j ImportJob
 	var sourceID string
 	err := q.QueryRow(ctx, `SELECT id, filename, status, headers, column_mapping, total_rows, valid_rows, error_rows,
-		duplicate_rows, committed_rows, errors, declared_source_id, created_at, committed_at FROM import_jobs WHERE id = $1`, id).
+		duplicate_rows, committed_rows, errors, declared_source_id, created_at, committed_at,
+		task, task_started_at, task_finished_at, task_result, task_error FROM import_jobs WHERE id = $1`, id).
 		Scan(&j.ID, &j.Filename, &j.Status, &j.Headers, &j.ColumnMapping, &j.TotalRows, &j.ValidRows, &j.ErrorRows,
-			&j.DuplicateRows, &j.CommittedRows, &j.Errors, &sourceID, &j.CreatedAt, &j.CommittedAt)
+			&j.DuplicateRows, &j.CommittedRows, &j.Errors, &sourceID, &j.CreatedAt, &j.CommittedAt,
+			&j.Task, &j.TaskStartedAt, &j.TaskFinishedAt, &j.TaskResult, &j.TaskError)
 	if err != nil {
 		return j, err
 	}
@@ -119,6 +127,9 @@ type CreateImportInput struct {
 	SourceID  string       // existing source, or
 	NewSource *SourceInput // a new source declaration
 	Mapping   map[string]string
+	// Defer leaves row processing to a background task (status "uploaded", task "process").
+	// The caller then runs RunImportTask(jobID, "process", ...).
+	Defer bool
 }
 
 // CreateImport parses and stages a CSV. Nothing reaches the companies table until commit.
@@ -179,6 +190,10 @@ func (s *Store) CreateImport(ctx context.Context, a Actor, in CreateImportInput)
 			_, err2 := tx.Exec(ctx, `UPDATE import_jobs SET status = 'uploaded', errors = $2 WHERE id = $1`, jobID, mustJSON([]string{err.Error()}))
 			return err2
 		}
+		if in.Defer {
+			_, err := tx.Exec(ctx, `UPDATE import_jobs SET status = 'uploaded', task = 'process', task_started_at = now() WHERE id = $1`, jobID)
+			return err
+		}
 		return processRows(ctx, tx, jobID, mapping)
 	})
 	if err != nil {
@@ -219,12 +234,12 @@ func processRows(ctx context.Context, tx pgx.Tx, jobID string, mapping map[strin
 		var cands []Candidate
 		if len(res.Errors) == 0 {
 			hashes := []string{}
-			cands, err = FindCandidates(ctx, tx, CandidateKey{NormalizedName: n.NormalizedName, Domain: n.WebsiteDomain, City: n.Facility.City, ContactHashes: hashes})
+			cands, err = FindCandidates(ctx, tx, CandidateKey{NormalizedName: n.NormalizedName, Domain: n.WebsiteDomain, City: n.Facility.City, GSTIN: n.GSTIN, ContactHashes: hashes})
 			if err != nil {
 				return err
 			}
 			// Duplicates within the same file.
-			for _, k := range []seenKey{{"name", n.NormalizedName + "|" + strings.ToLower(n.Facility.City)}, {"domain", n.WebsiteDomain}} {
+			for _, k := range []seenKey{{"name", n.NormalizedName + "|" + strings.ToLower(n.Facility.City)}, {"domain", n.WebsiteDomain}, {"GSTIN", n.GSTIN}} {
 				if k.val == "" || k.val == "|" {
 					continue
 				}
@@ -275,12 +290,18 @@ func orEmptyIssues(s []importer.Issue) []importer.Issue {
 }
 
 // RemapImport re-runs normalisation with a new mapping (uncommitted jobs only).
-func (s *Store) RemapImport(ctx context.Context, a Actor, id string, mapping map[string]string) (ImportJob, error) {
+// With deferred=true the mapping is saved and a background "process" task is claimed; the caller
+// then runs RunImportTask.
+func (s *Store) RemapImport(ctx context.Context, a Actor, id string, mapping map[string]string, deferred ...bool) (ImportJob, error) {
 	err := s.InTx(ctx, func(tx pgx.Tx) error {
 		var status string
 		var headers []string
-		if err := tx.QueryRow(ctx, `SELECT status, headers FROM import_jobs WHERE id = $1 FOR UPDATE`, id).Scan(&status, &headers); err != nil {
+		var task *string
+		if err := tx.QueryRow(ctx, `SELECT status, headers, task FROM import_jobs WHERE id = $1 FOR UPDATE`, id).Scan(&status, &headers, &task); err != nil {
 			return err
+		}
+		if task != nil {
+			return ErrConflict{Msg: "another operation is still running on this import; wait for it to finish"}
 		}
 		if status != "uploaded" && status != "staged" {
 			return ErrConflict{Msg: "mapping can only be changed before commit (status is " + status + ")"}
@@ -288,7 +309,12 @@ func (s *Store) RemapImport(ctx context.Context, a Actor, id string, mapping map
 		if err := importer.ValidateMapping(mapping, headers); err != nil {
 			return ErrInvalid{Msg: err.Error(), Fields: map[string]string{"column_mapping": err.Error()}}
 		}
-		if err := processRows(ctx, tx, id, mapping); err != nil {
+		if len(deferred) > 0 && deferred[0] {
+			if _, err := tx.Exec(ctx, `UPDATE import_jobs SET column_mapping = $2, task = 'process', task_started_at = now(),
+				task_finished_at = NULL, task_result = NULL, task_error = NULL WHERE id = $1`, id, mustJSON(mapping)); err != nil {
+				return err
+			}
+		} else if err := processRows(ctx, tx, id, mapping); err != nil {
 			return err
 		}
 		return Audit(ctx, tx, a, "import.remap", "import_job", &id, nil, map[string]any{"column_mapping": mapping})
@@ -501,6 +527,7 @@ func (s *Store) createFromImport(ctx context.Context, tx pgx.Tx, a Actor, source
 	}
 	in := CompanyInput{SourceID: &sourceID, DisplayName: &n.DisplayName, Roles: &n.Roles, CategoryIDs: &catIDs}
 	in.LegalName, in.Description, in.WebsiteURL = strOrNil(n.LegalName), strOrNil(n.Description), strOrNil(n.WebsiteURL)
+	in.GSTIN = strOrNil(n.GSTIN)
 	if n.EstablishmentYear != 0 {
 		in.EstablishmentYear = &n.EstablishmentYear
 	}
@@ -599,7 +626,8 @@ func (s *Store) mergeFromImport(ctx context.Context, tx pgx.Tx, sourceID, compan
 	if deleted {
 		return ErrConflict{Msg: "merge target has been deleted"}
 	}
-	fill := map[string]any{"legal_name": strOrNil(n.LegalName), "description": strOrNil(n.Description), "website_url": strOrNil(n.WebsiteURL)}
+	fill := map[string]any{"legal_name": strOrNil(n.LegalName), "description": strOrNil(n.Description), "website_url": strOrNil(n.WebsiteURL),
+		"gstin": strOrNil(n.GSTIN)}
 	if n.EstablishmentYear != 0 {
 		fill["establishment_year"] = n.EstablishmentYear
 	}

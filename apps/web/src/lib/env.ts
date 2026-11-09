@@ -34,3 +34,8 @@ export function privacyEmail(): string {
 export function absoluteUrl(path: string): string {
   return `${siteUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 }
+
+/** Inbox for buyer enquiries and full-profile requests (falls back to the privacy inbox). */
+export function contactEmail(): string {
+  return readEnv("NEXT_PUBLIC_CONTACT_EMAIL") ?? privacyEmail();
+}

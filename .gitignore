@@ -8,3 +8,9 @@ apps/web/test-results/
 apps/web/playwright-report/
 apps/web/next-env.d.ts
 *.local
+
+# Real supplier data (contains phone numbers). Never commit.
+/supplier.csv
+/suppliers_import.csv
+/data/
+

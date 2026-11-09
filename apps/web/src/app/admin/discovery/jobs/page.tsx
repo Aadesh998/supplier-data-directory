@@ -73,7 +73,7 @@ function Upload({ canEdit }: { canEdit: boolean }) {
         Rows are matched by <code>job_id</code>: new ids are added, existing ids get their search details updated. Their run
         history is kept unless you tick “reset”. Required columns: <code>job_id, keyword, search_query, location, latitude,
         longitude, radius_km</code>. Optional: <code>provider</code> (<code>osm_overpass</code> default, or{" "}
-        <code>google_places_ids</code>), <code>priority, category_slug, state_code, osm_name_regex, refresh_interval_days</code>.
+        <code>google_places_ids</code>, or <code>gmaps_scraper</code> for the Google Maps worker), <code>priority, category_slug, state_code, osm_name_regex, refresh_interval_days</code>.
       </p>
       <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-3">
         <div>
@@ -208,7 +208,7 @@ export default function DiscoveryJobsPage() {
                         <p className="font-mono text-xs text-slate-500">{j.job_key}</p>
                         {j.last_error && <p className="text-xs text-red-700">{j.last_error}</p>}
                       </td>
-                      <td className="text-xs">{j.provider === "osm_overpass" ? "OpenStreetMap" : "Places IDs"}</td>
+                      <td className="text-xs">{j.provider === "osm_overpass" ? "OpenStreetMap" : j.provider === "gmaps_scraper" ? "Maps scraper" : "Places IDs"}</td>
                       <td>
                         <StatusBadge status={j.status} />
                         {j.attempts > 0 && <span className="ml-1 text-xs text-slate-500">try {j.attempts}/{j.max_attempts}</span>}

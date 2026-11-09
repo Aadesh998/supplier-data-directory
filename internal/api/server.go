@@ -147,6 +147,8 @@ func (s *Server) Routes() http.Handler {
 				r.Method(http.MethodPost, "/privacy-requests/{id}/resolve", s.role(h(s.resolvePrivacyRequest), "owner", "admin"))
 				r.Method(http.MethodGet, "/users", s.role(h(s.listUsers), "owner"))
 				r.Method(http.MethodPost, "/users", s.role(h(s.createUser), "owner"))
+				r.Method(http.MethodPatch, "/users/{id}", s.role(h(s.updateUser), "owner"))
+				r.Method(http.MethodPost, "/users/{id}/password", s.role(h(s.resetUserPassword), "owner"))
 
 				r.Method(http.MethodGet, "/discovery/status", h(s.discoveryStatus))
 				r.Method(http.MethodPost, "/discovery/search", s.role(h(s.discoverySearch), "owner", "admin"))

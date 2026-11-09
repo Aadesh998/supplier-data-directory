@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ type Config struct {
 	Env                  string // development | test | production
 	HTTPAddr             string
 	DatabaseURL          string
+	DatabaseSchema       string // optional: keep every table in this schema (for shared databases)
 	MigrateOnStart       bool
 	DataEncryptionKey    string
 	PublicSiteURL        string
@@ -48,12 +50,15 @@ type Config struct {
 // IsProduction reports whether production safeguards should apply.
 func (c Config) IsProduction() bool { return c.Env == "production" }
 
+var schemaName = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
+
 // Load reads configuration and validates it.
 func Load() (Config, error) {
 	c := Config{
 		Env:                  get("APP_ENV", "development"),
 		HTTPAddr:             get("HTTP_ADDR", ":8080"),
 		DatabaseURL:          os.Getenv("DATABASE_URL"),
+		DatabaseSchema:       os.Getenv("DATABASE_SCHEMA"),
 		MigrateOnStart:       getBool("MIGRATE_ON_START", false),
 		DataEncryptionKey:    os.Getenv("DATA_ENCRYPTION_KEY"),
 		PublicSiteURL:        strings.TrimRight(get("PUBLIC_SITE_URL", "http://localhost:3000"), "/"),
@@ -67,7 +72,7 @@ func Load() (Config, error) {
 		SMTPPort:             getInt("SMTP_PORT", 587),
 		SMTPUsername:         os.Getenv("SMTP_USERNAME"),
 		SMTPPassword:         os.Getenv("SMTP_PASSWORD"),
-		MailFrom:             get("MAIL_FROM", "Bharat Manufacturing Directory <no-reply@localhost>"),
+		MailFrom:             get("MAIL_FROM", "Peoplvance <no-reply@localhost>"),
 		AdminNotify:          os.Getenv("ADMIN_NOTIFY_EMAIL"),
 		WorkerToken:          os.Getenv("WORKER_TOKEN"),
 		InternalAPIToken:     os.Getenv("INTERNAL_API_TOKEN"),
@@ -80,6 +85,9 @@ func Load() (Config, error) {
 	var errs []error
 	if c.DatabaseURL == "" {
 		errs = append(errs, errors.New("DATABASE_URL is required"))
+	}
+	if c.DatabaseSchema != "" && !schemaName.MatchString(c.DatabaseSchema) {
+		errs = append(errs, errors.New("DATABASE_SCHEMA must be a lowercase identifier (a-z, 0-9, _), max 63 chars"))
 	}
 	if c.DataEncryptionKey == "" {
 		if c.IsProduction() {

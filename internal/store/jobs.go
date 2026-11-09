@@ -154,8 +154,8 @@ func parseJobsCSV(data []byte, validCategories, validStates map[string]bool) ([]
 		if j.provider == "" {
 			j.provider = ProviderOSM
 		}
-		if j.provider != ProviderOSM && j.provider != ProviderGooglePlaces {
-			bad("provider must be osm_overpass or google_places_ids")
+		if j.provider != ProviderOSM && j.provider != ProviderGooglePlaces && j.provider != ProviderGmaps {
+			bad("provider must be osm_overpass, google_places_ids or gmaps_scraper")
 			continue
 		}
 		var errLat, errLng, errRad error

@@ -30,18 +30,26 @@
       { "name": "WEB", "class_name": "WebContainer" }
     ]
   },
+  // Serve on the apex domain once peoplvance.org is a zone in this Cloudflare account. Add
+  // { "pattern": "www.peoplvance.org", "custom_domain": true } too and redirect www → apex with a
+  // Redirect Rule so there is one canonical host.
+  "routes": [{ "pattern": "peoplvance.org", "custom_domain": true }],
+
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer", "WebContainer"] }],
 
   // Every 5 minutes: discovery cycle (claims DISCOVERY_JOBS_PER_RUN jobs). Daily 03:17 UTC: maintenance.
   "triggers": { "crons": ["*/5 * * * *", "17 3 * * *"] },
 
   "vars": {
-    // Your public origin, e.g. https://directory.example.com (or the workers.dev URL before a custom domain).
-    "PUBLIC_SITE_URL": "https://bharatmfg.example.workers.dev",
+    // Your public origin. Before peoplvance.org is attached (routes below), use the workers.dev URL.
+    "PUBLIC_SITE_URL": "https://peoplvance.org",
     "NEXT_PUBLIC_ALLOW_INDEXING": "false",
-    "PRIVACY_EMAIL": "privacy@example.com",
-    "MAIL_FROM": "Bharat Manufacturing Directory <no-reply@example.com>",
+    "PRIVACY_EMAIL": "privacy@peoplvance.org",
+    "CONTACT_EMAIL": "hello@peoplvance.org",
+    "MAIL_FROM": "Peoplvance <no-reply@peoplvance.org>",
     "PRIVACY_NOTICE_VERSION": "2026-11-v1",
+    // Schema holding the tables when the database is shared (Railway: "peoplvance_dir"). Empty = public.
+    "DATABASE_SCHEMA": "peoplvance_dir",
     // Discovery runner
     "DISCOVERY_ENABLED": "false",
     "DISCOVERY_JOBS_PER_RUN": "4",

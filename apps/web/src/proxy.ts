@@ -25,18 +25,18 @@ const REMOVED_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Profile removed | Bharat Manufacturing Directory</title>
+<title>Profile removed | Peoplvance</title>
 <style>
-body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f8fafc;color:#0f172a;line-height:1.6}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#fff;color:#09090b;line-height:1.6}
 main{max-width:40rem;margin:0 auto;padding:4rem 1rem}
 h1{font-size:1.875rem;margin:0 0 1rem}
-a{color:#1b4a83}
-.btn{display:inline-block;margin-top:1rem;padding:.5rem 1rem;border:1px solid #cbd5e1;border-radius:.375rem;background:#fff;text-decoration:none;color:#1e293b}
+a{color:#1d4ed8}
+.btn{display:inline-block;margin-top:1rem;padding:.5rem 1rem;border:1px solid #e4e4e7;border-radius:.25rem;background:#fff;text-decoration:none;color:#09090b}
 </style>
 </head>
 <body>
 <main>
-<p><a href="/">Bharat Manufacturing Directory</a></p>
+<p><a href="/">Peoplvance</a></p>
 <h1>This profile has been removed</h1>
 <p>The business profile that used to be at this address is no longer published. This can happen when a business withdraws permission, asks for removal, or the listing no longer meets our publication rules.</p>
 <p>If you represent the business and believe this is a mistake, please <a href="/request-correction">contact us through the correction form</a>.</p>

@@ -23,10 +23,14 @@ export async function generateMetadata({ params, searchParams }: Props) {
   const count = category.published_company_count ?? 0;
   const thin = count < THIN_THRESHOLD && children.length === 0;
   return pageMetadata({
-    title: page > 1 ? `${category.name} suppliers in India — page ${page}` : `${category.name} suppliers in India`,
-    description:
-      category.description?.slice(0, 160) ||
-      `Reviewed ${category.name.toLowerCase()} manufacturers and suppliers in India listed in the Bharat Manufacturing Directory.`,
+    title:
+      page > 1
+        ? `${category.name} Manufacturers & Suppliers in India (page ${page})`
+        : `${category.name} Manufacturers & Suppliers in India`,
+    description: (
+      `${count > 0 ? `${count} reviewed` : "Reviewed"} ${category.name.toLowerCase()} manufacturers, suppliers and job-work units in India. ` +
+      (category.description ?? "Compare products, capabilities, certifications and locations by state.")
+    ).slice(0, 158),
     path: pagedPath(`/industries/${category.slug}`, page),
     noindex: thin,
   });

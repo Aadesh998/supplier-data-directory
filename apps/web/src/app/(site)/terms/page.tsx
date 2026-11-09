@@ -3,7 +3,7 @@ import { StaticPage } from "@/components/site/StaticPage";
 import { pageMetadata } from "@/lib/seo";
 
 export async function generateMetadata() {
-  return pageMetadata({ title: "Terms of use", description: "Terms for using the Bharat Manufacturing Directory during its beta.", path: "/terms" });
+  return pageMetadata({ title: "Terms of use", description: "Terms for using Peoplvance during its beta.", path: "/terms" });
 }
 
 export default function TermsPage() {

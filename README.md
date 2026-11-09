@@ -1,6 +1,6 @@
-# Bharat Manufacturing Directory
+# Peoplvance
 
-A database of Indian manufacturers and suppliers, plus a public website and admin console, built so that **every field knows where it came from and what you are allowed to do with it**. It is for a solo founder: one Go API, one Next.js app, one PostgreSQL database.
+**peoplvance.org**: a database of Indian manufacturers and suppliers, plus a public website and admin console, built so that **every field knows where it came from and what you are allowed to do with it**. It is for a solo founder: one Go API, one Next.js app, one PostgreSQL database.
 
 > Status: MVP / private beta. Nothing is published unless a person approves it **and** the data's source allows public display. The paid external API is deliberately not switched on yet (see [ADR 0007](docs/adr/0007-defer-external-api-billing.md)).
 
@@ -12,7 +12,9 @@ A database of Indian manufacturers and suppliers, plus a public website and admi
 | **Imports** | Upload a CSV (e.g. your existing 1,200 records). Declare where the data came from and its reuse rights, map columns, review normalisation and duplicate candidates, dry-run, commit, roll back, download a validation report. |
 | **Supplier self-registration** | A 6-step mobile form with three separate, unticked permissions: privacy acknowledgement, public listing, and future commercial/API use. Has a honeypot, a timing check, rate limits and idempotency. |
 | **Admin console** | Review submissions, edit companies, verify, publish or unpublish, merge duplicates, manage taxonomy and sources, handle privacy requests, run permission-filtered exports, read the audit log. |
-| **Public site** | Industry, location and supplier pages, plus search. SEO metadata, sitemap and robots are built only from approved, permitted data. The site stays `noindex` until you switch indexing on. |
+| **Public site** | Content-rich landing page, plus industry, location and supplier pages and search. SEO metadata, Open Graph image, sitemap and robots are built only from approved, permitted data. The site stays `noindex` until you switch indexing on. See the [keyword plan](docs/seo/keyword-research.md). |
+| **Teaser profiles** | Public supplier pages show what a business makes and where it is based. Contacts, website, legal name, exact locality, certificate issuers and the full product list are withheld by the API (never sent to the browser). Visitors see locked placeholders and a "Request full profile" link. |
+| **Users** | Admin → Users (owner-only): create users, change roles, deactivate, reset passwords. Or use `scripts/create-user.sh`. |
 | **Safety rails in the database** | Triggers and constraints refuse to publish without public-display permission. Personal contacts can never be public. Permissions default to `false`. The audit log is append-only. |
 | **Discovery** | A Google Places lookup that is off by default. Results are transient; only place IDs may be stored as leads. |
 | **Discovery job queue** | Upload a jobs CSV (e.g. `scripts/jobs/jobs.csv`: 14,419 sector × location searches across India) whenever you like. Workers claim jobs on a schedule (default 4 every 5 minutes) with leases, retries and backoff. Finished jobs repeat after a refresh interval, so results stay current. Executors: OpenStreetMap (Overpass) and Google Places ID-only. The database refuses to store Google content beyond place IDs. Results are leads for review; nothing is published automatically. |
@@ -26,8 +28,7 @@ Prerequisites: Docker with Compose v2. For development outside Docker you also n
 cp .env.example .env              # defaults work for local use; change API_PORT if 8080 is taken
 docker compose up -d --build      # postgres, mailpit, api (runs migrations), web
 docker compose exec api /api seed                                    # 20 clearly-synthetic private records
-docker compose exec -e ADMIN_PASSWORD='choose-a-long-password' api \
-  /api create-admin --email you@example.com --role owner             # your owner login
+scripts/create-user.sh --email you@example.com --role owner          # your owner login (prompts for a 12+ char password)
 ```
 
 Then open:
@@ -45,6 +46,14 @@ Optional: `docker compose exec api /api seed --demo` publishes the synthetic rec
 2. Admin → **Imports** → upload the CSV (UTF-8; export from Excel as "CSV UTF-8").
 3. Check the column mapping, review rows with errors or duplicate candidates, then **Dry run** → **Commit**.
 4. Imported companies are `approved_private`. To publish one, its data must be backed by a source that allows public display.
+
+### Using a hosted / shared PostgreSQL (e.g. Railway)
+
+Put the connection string in `DATABASE_URL` and set `DATABASE_SCHEMA=peoplvance_dir` (any lowercase name). Every table, and the migration history, then lives in that schema, so other applications in the same database are untouched, and `migrate reset` is refused. To run the Docker API container against it too, set `API_DATABASE_URL=${DATABASE_URL}`. The local Postgres container and the test suite use `LOCAL_PG_*` and never touch `DATABASE_URL`.
+
+### Bulk-importing your supplier list
+
+Admin → **Imports** → upload the CSV (e.g. `suppliers_import.csv`, which is git-ignored because it contains phone numbers). Pick or create a data source with internal use allowed, check the column mapping (GSTIN, phone, categories and so on map automatically), then run **Preview (dry run)** → **Commit import**. Row checking, the preview and the commit all run in the background on the server, so large files aren't cut off by request timeouts. The page shows progress, and you can leave it and come back. Records are created private, phones are encrypted, and GSTINs are used for duplicate checks. Roll back from the same page. The CLI equivalent is `api import-csv --file F --as ADMIN_EMAIL --source-name NAME --commit`.
 
 ### Running discovery jobs
 
@@ -72,6 +81,8 @@ make help         # everything else
 | `go run ./apps/api migrate up\|down\|reset\|status` | Schema migrations (Goose, embedded in the binary) |
 | `go run ./apps/api maintenance` | Re-verification, permission-expiry and retention jobs (also runs daily inside `serve`) |
 | `go run ./apps/api create-admin --email E --role owner\|admin\|reviewer` | Create an admin user |
+| `go run ./apps/api import-csv --file F --as ADMIN_EMAIL --source-name NAME [--commit]` | Stage (and optionally commit) a CSV through the importer, the same as Admin → Imports |
+| `scripts/create-user.sh --email E [--role R] [--reset]` | Create an admin user or reset a password (Docker or host) |
 | `go run ./apps/api set-password --email E` | Reset a forgotten admin password (revokes that admin's sessions). With Docker: `docker compose exec -e ADMIN_PASSWORD='…' api /api set-password --email E` |
 
 ## Repository layout

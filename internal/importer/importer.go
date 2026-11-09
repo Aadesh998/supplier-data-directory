@@ -30,6 +30,7 @@ type Field struct {
 var Fields = []Field{
 	{"display_name", "Company name", true, "Trading or display name."},
 	{"legal_name", "Legal name", false, "Registered legal name, if different."},
+	{"gstin", "GSTIN", false, "15-character GST number. Kept private; used for duplicate checks and to fill a missing state."},
 	{"description", "Description", false, "Short factual description."},
 	{"website_url", "Website", false, "http(s) address; invalid values are dropped with a warning."},
 	{"establishment_year", "Year established", false, "Four-digit year."},
@@ -50,6 +51,7 @@ var Fields = []Field{
 var synonyms = map[string][]string{
 	"display_name":       {"company name", "company", "name", "business name", "firm name", "firm", "supplier name", "supplier", "display name", "trade name"},
 	"legal_name":         {"legal name", "registered name", "legal entity", "registered company name"},
+	"gstin":              {"gstin", "gst", "gst number", "gst no", "gstin number", "gst in", "gstno", "gstnumber"},
 	"description":        {"description", "about", "profile", "business description", "details"},
 	"website_url":        {"website", "web site", "url", "web", "website url", "site"},
 	"establishment_year": {"year established", "established", "year of establishment", "establishment year", "since", "founded", "year"},
@@ -243,6 +245,7 @@ type Normalized struct {
 	DisplayName       string   `json:"display_name,omitempty"`
 	NormalizedName    string   `json:"normalized_name,omitempty"`
 	LegalName         string   `json:"legal_name,omitempty"`
+	GSTIN             string   `json:"gstin,omitempty"`
 	Description       string   `json:"description,omitempty"`
 	WebsiteURL        string   `json:"website_url,omitempty"`
 	WebsiteDomain     string   `json:"website_domain,omitempty"`
@@ -319,6 +322,13 @@ func NormalizeRow(raw map[string]string, mapping map[string]string, lk Lookups) 
 		res.Errors = append(res.Errors, Issue{"display_name", "is required"})
 	}
 	n.LegalName = normalize.Whitespace(get("legal_name"))
+	if raw := get("gstin"); strings.TrimSpace(raw) != "" {
+		if g, ok := normalize.GSTIN(raw); ok {
+			n.GSTIN = g
+		} else {
+			warn("gstin", fmt.Sprintf("%q is not a valid 15-character GSTIN and was dropped", strings.TrimSpace(raw)))
+		}
+	}
 	n.Description = strings.TrimSpace(get("description"))
 	if len(n.Description) > 5000 {
 		n.Description = n.Description[:5000]
@@ -410,6 +420,12 @@ func NormalizeRow(raw map[string]string, mapping map[string]string, lk Lookups) 
 			}
 		} else {
 			warn("state", fmt.Sprintf("unrecognised state %q was dropped", s))
+		}
+	}
+	if f.StateCode == "" && n.GSTIN != "" {
+		if code, ok := normalize.StateFromGSTIN(n.GSTIN); ok {
+			f.StateCode = code
+			logf("state: %s inferred from GSTIN prefix", code)
 		}
 	}
 	if p := normalize.Whitespace(get("postal_code")); p != "" {

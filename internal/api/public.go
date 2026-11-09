@@ -93,6 +93,7 @@ func (s *Server) getPublic(w http.ResponseWriter, r *http.Request) error {
 	}
 	switch {
 	case res.Company != nil:
+		res.Company.Teaser()
 		publicCache(w)
 		httpx.JSON(w, 200, res.Company)
 	case res.RedirectSlug != "":
@@ -179,7 +180,7 @@ func (s *Server) createSubmission(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *Server) mailData() map[string]any {
-	return map[string]any{"SiteName": "Bharat Manufacturing Directory", "SiteURL": s.Cfg.PublicSiteURL}
+	return map[string]any{"SiteName": "Peoplvance", "SiteURL": s.Cfg.PublicSiteURL}
 }
 
 var requestTypeLabels = map[string]string{

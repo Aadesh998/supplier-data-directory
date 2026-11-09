@@ -19,7 +19,7 @@ Schema source of truth: `db/migrations/`. Conventions:
 
 | Table | Purpose | Notable rules |
 |---|---|---|
-| `companies` | One business entity | `publication_status` workflow; `verification_status` independent. `published` requires `published_at`, not deleted, not withdrawn, and (trigger) public-display provenance for `display_name`. `slug` stays reserved after soft delete. `normalized_name` (lowercase, legal suffixes stripped) is trigram-indexed for search and dedupe. |
+| `companies` | One business entity | `publication_status` workflow; `verification_status` independent. `published` requires `published_at`, not deleted, not withdrawn, and (trigger) public-display provenance for `display_name`. `slug` stays reserved after soft delete. `normalized_name` (lowercase, legal suffixes stripped) is trigram-indexed for search and dedupe. `gstin` (optional, format-checked, unique among live records) is internal only and is used for duplicate detection. |
 | `slug_redirects` | Old slug → company (after renames and merges) | Public API answers 301 |
 | `company_roles` | Many-to-many roles, each with `source_id` | |
 | `company_categories` | Many-to-many categories, with `source_id`, `confidence`, `verified_at` | |

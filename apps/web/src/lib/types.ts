@@ -96,6 +96,17 @@ export type PublicCompany = PublicCompanySummary & {
   source_labels?: string[];
   published_at?: string;
   last_verified_at?: string;
+  /** Details that exist but are withheld from the open web (counts/flags only, never values). */
+  locked?: LockedDetails;
+};
+
+export type LockedDetails = {
+  contacts: number;
+  website: boolean;
+  legal_name: boolean;
+  facility_details: number;
+  certification_issuers: number;
+  more_products: number;
 };
 
 export type SitemapData = {
@@ -377,6 +388,13 @@ export type ImportJob = {
   source?: DataSource;
   created_at: string;
   committed_at: string | null;
+  /** Background task currently running (null when idle). */
+  task?: "process" | "dry_run" | "commit" | null;
+  task_started_at?: string | null;
+  task_finished_at?: string | null;
+  /** Last task's result: CommitResult for dry_run/commit, row counts for process. */
+  task_result?: (CommitResult & Record<string, unknown>) | Record<string, unknown> | null;
+  task_error?: string | null;
 };
 
 export type FieldMessage = { field: string; message: string };
@@ -479,7 +497,7 @@ export type DiscoveryLead = {
 };
 
 // --- Discovery job queue ---
-export type DiscoveryProvider = "osm_overpass" | "google_places_ids";
+export type DiscoveryProvider = "osm_overpass" | "google_places_ids" | "gmaps_scraper";
 
 export type DiscoveryJob = {
   id: string;

@@ -25,8 +25,8 @@ export async function generateMetadata({ params, searchParams }: Props) {
   if (!found.ok || !found.state) return { title: "Location", robots: { index: false, follow: false } };
   const s = found.state;
   return pageMetadata({
-    title: page > 1 ? `Manufacturers and suppliers in ${s.name} — page ${page}` : `Manufacturers and suppliers in ${s.name}`,
-    description: `Reviewed, published profiles of manufacturers and industrial suppliers with facilities in ${s.name}, India.`,
+    title: page > 1 ? `Manufacturers & Suppliers in ${s.name} (page ${page})` : `Manufacturers & Suppliers in ${s.name}`,
+    description: `Find reviewed manufacturers, industrial suppliers, exporters and job-work units in ${s.name}. Browse by industry, city and capability on Peoplvance.`,
     path: pagedPath(`/locations/${s.slug}`, page),
     noindex: (s.published_company_count ?? 0) < THIN_THRESHOLD,
   });

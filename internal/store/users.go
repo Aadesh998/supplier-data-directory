@@ -162,3 +162,56 @@ func SetPassword(ctx context.Context, q DBTX, a Actor, email, password string) e
 	}
 	return Audit(ctx, q, a, "admin_user.set_password", "admin_user", &id, nil, nil)
 }
+
+// AdminUserPatch changes an admin's profile, role or active flag (nil = unchanged).
+type AdminUserPatch struct {
+	DisplayName *string
+	Role        *string
+	Active      *bool
+}
+
+// UpdateAdminUser applies a patch. An actor cannot demote or deactivate themselves, and the last
+// active owner cannot be demoted or deactivated. Deactivation revokes the user's sessions.
+func UpdateAdminUser(ctx context.Context, q DBTX, a Actor, id string, p AdminUserPatch) (AdminUser, error) {
+	before, err := scanUser(q.QueryRow(ctx, `SELECT `+userCols+` FROM admin_users WHERE id = $1 FOR UPDATE`, id))
+	if err != nil {
+		return AdminUser{}, err
+	}
+	demoting := p.Role != nil && *p.Role != before.Role && before.Role == "owner"
+	deactivating := p.Active != nil && !*p.Active && before.Active
+	if (demoting || deactivating) && id == a.ID {
+		return AdminUser{}, ErrConflict{Msg: "you cannot demote or deactivate your own account"}
+	}
+	if (demoting || deactivating) && before.Role == "owner" {
+		var owners int
+		if err := q.QueryRow(ctx, `SELECT count(*) FROM admin_users WHERE role = 'owner' AND active AND id <> $1`, id).Scan(&owners); err != nil {
+			return AdminUser{}, err
+		}
+		if owners == 0 {
+			return AdminUser{}, ErrConflict{Msg: "at least one active owner must remain"}
+		}
+	}
+	u, err := scanUser(q.QueryRow(ctx, `UPDATE admin_users SET
+		display_name = COALESCE($2, display_name), role = COALESCE($3, role), active = COALESCE($4, active)
+		WHERE id = $1 RETURNING `+userCols, id, p.DisplayName, p.Role, p.Active))
+	if err != nil {
+		return u, err
+	}
+	if deactivating || (p.Role != nil && *p.Role != before.Role) {
+		if _, err := q.Exec(ctx, `UPDATE admin_sessions SET revoked_at = now() WHERE admin_user_id = $1 AND revoked_at IS NULL`, id); err != nil {
+			return u, err
+		}
+	}
+	return u, Audit(ctx, q, a, "admin_user.update", "admin_user", &id,
+		map[string]any{"role": before.Role, "active": before.Active, "display_name": before.DisplayName},
+		map[string]any{"role": u.Role, "active": u.Active, "display_name": u.DisplayName})
+}
+
+// SetPasswordByID resets an admin's password by id (see SetPassword).
+func SetPasswordByID(ctx context.Context, q DBTX, a Actor, id, password string) error {
+	var email string
+	if err := q.QueryRow(ctx, `SELECT email::text FROM admin_users WHERE id = $1`, id).Scan(&email); err != nil {
+		return err
+	}
+	return SetPassword(ctx, q, a, email, password)
+}

@@ -11,12 +11,15 @@ export interface Env {
   PUBLIC_SITE_URL: string;
   NEXT_PUBLIC_ALLOW_INDEXING: string;
   PRIVACY_EMAIL: string;
+  CONTACT_EMAIL?: string;
   MAIL_FROM: string;
   PRIVACY_NOTICE_VERSION: string;
   DISCOVERY_ENABLED: string;
   DISCOVERY_JOBS_PER_RUN: string;
   DISCOVERY_PROVIDERS: string;
   OVERPASS_URL: string;
+  // Optional: tables live in this schema of a shared database (e.g. peoplvance_dir on Railway).
+  DATABASE_SCHEMA?: string;
   // secrets (wrangler secret put)
   DATABASE_URL: string;
   DATA_ENCRYPTION_KEY: string;
@@ -50,6 +53,7 @@ export class ApiContainer extends Container<Env> {
       HTTP_ADDR: ":8080",
       MIGRATE_ON_START: "true",
       DATABASE_URL: env.DATABASE_URL,
+      DATABASE_SCHEMA: env.DATABASE_SCHEMA,
       DATA_ENCRYPTION_KEY: env.DATA_ENCRYPTION_KEY,
       INTERNAL_API_TOKEN: env.INTERNAL_API_TOKEN,
       WORKER_TOKEN: env.WORKER_TOKEN,
@@ -84,6 +88,7 @@ export class WebContainer extends Container<Env> {
       NEXT_PUBLIC_SITE_URL: origin,
       NEXT_PUBLIC_ALLOW_INDEXING: env.NEXT_PUBLIC_ALLOW_INDEXING,
       NEXT_PUBLIC_PRIVACY_EMAIL: env.PRIVACY_EMAIL,
+      NEXT_PUBLIC_CONTACT_EMAIL: env.CONTACT_EMAIL ?? env.PRIVACY_EMAIL,
     });
   }
 }

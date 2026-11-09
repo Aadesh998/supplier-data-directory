@@ -79,6 +79,46 @@ type PublicCompany struct {
 	SourceLabels      []string              `json:"source_labels"`
 	PublishedAt       *time.Time            `json:"published_at,omitempty"`
 	LastVerifiedAt    *time.Time            `json:"last_verified_at,omitempty"`
+	Locked            *LockedDetails        `json:"locked,omitempty"`
+}
+
+// LockedDetails tells a public visitor which details exist but are withheld from the open web.
+// Only counts and flags are sent, never the values themselves.
+type LockedDetails struct {
+	Contacts          int  `json:"contacts"`
+	Website           bool `json:"website"`
+	LegalName         bool `json:"legal_name"`
+	FacilityDetails   int  `json:"facility_details"`
+	CertificationInfo int  `json:"certification_issuers"`
+	MoreProducts      int  `json:"more_products"`
+}
+
+// TeaserProductLimit is how many products an open-web profile shows.
+const TeaserProductLimit = 3
+
+// Teaser strips the details that the open web does not get (contacts, website, legal name, locality,
+// certificate issuers, products beyond the first few) and records what was withheld. Values are
+// removed server-side, so they never reach the browser.
+func (c *PublicCompany) Teaser() {
+	l := &LockedDetails{Contacts: len(c.Contacts), Website: c.WebsiteURL != "", LegalName: c.LegalName != ""}
+	c.Contacts, c.WebsiteURL, c.LegalName = []PublicContact{}, "", ""
+	for i := range c.Facilities {
+		if c.Facilities[i].Locality != "" || c.Facilities[i].District != "" {
+			l.FacilityDetails++
+		}
+		c.Facilities[i].Locality, c.Facilities[i].District = "", ""
+	}
+	for i := range c.Certifications {
+		if c.Certifications[i].Issuer != "" {
+			l.CertificationInfo++
+		}
+		c.Certifications[i].Issuer = ""
+	}
+	if len(c.Products) > TeaserProductLimit {
+		l.MoreProducts = len(c.Products) - TeaserProductLimit
+		c.Products = c.Products[:TeaserProductLimit]
+	}
+	c.Locked = l
 }
 
 // PublicFilter filters public search.
