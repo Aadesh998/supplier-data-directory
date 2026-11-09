@@ -1,6 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 import { useApi, useAuth } from "@/components/admin/AuthProvider";
 import { AdminPagination, EmptyState, ErrorState, LoadingState, PageHeader, StatusBadge } from "@/components/admin/ui";
@@ -214,7 +215,13 @@ export default function DiscoveryJobsPage() {
                         {j.attempts > 0 && <span className="ml-1 text-xs text-slate-500">try {j.attempts}/{j.max_attempts}</span>}
                       </td>
                       <td className="tabular-nums text-sm">
-                        {j.results_count ?? "—"}
+                        {j.provider === "gmaps_scraper" && j.total_results > 0 ? (
+                          <Link href={`/admin/discovery/leads?job=${encodeURIComponent(j.job_key)}`} className="link">
+                            {j.results_count ?? "—"}
+                          </Link>
+                        ) : (
+                          (j.results_count ?? "—")
+                        )}
                         {j.total_results > 0 && <span className="text-xs text-slate-500"> ({j.total_results} new total)</span>}
                       </td>
                       <td className="whitespace-nowrap text-xs">{j.last_run_at ? formatDateTime(j.last_run_at) : "—"}</td>

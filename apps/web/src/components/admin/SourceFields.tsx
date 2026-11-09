@@ -10,6 +10,7 @@ export const SOURCE_TYPES: SourceType[] = [
   "licensed_feed",
   "permitted_api_lookup",
   "manual_verification",
+  "public_web_listing",
 ];
 
 export type SourceFormValues = {

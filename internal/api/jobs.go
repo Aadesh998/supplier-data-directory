@@ -121,6 +121,52 @@ func (s *Server) promoteResult(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// --- Google Maps leads (gmaps_leads, found by the gmaps worker) ---
+
+func (s *Server) listGmapsLeads(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	p := httpx.ParsePagination(r, 50)
+	f := store.GmapsLeadFilter{Status: q.Get("status"), Category: q.Get("category"), State: q.Get("state"),
+		Search: strings.TrimSpace(q.Get("q")), JobKey: q.Get("job"),
+		HasPhone: q.Get("has_phone") == "true", HasWebsite: q.Get("has_website") == "true"}
+	data, total, err := store.ListGmapsLeads(r.Context(), s.Store.Pool, f, p.Limit, p.Offset())
+	if err != nil {
+		return err
+	}
+	httpx.JSON(w, 200, httpx.NewPaged(data, p, total))
+	return nil
+}
+
+func (s *Server) updateGmapsLead(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	var in resultStatusBody
+	if err := httpx.Decode(w, r, &in, 4<<10); err != nil {
+		return err
+	}
+	lead, err := store.SetGmapsLeadStatus(r.Context(), s.Store.Pool, s.actor(r), id, in.Status)
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, lead)
+	return nil
+}
+
+func (s *Server) promoteGmapsLead(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return err
+	}
+	companyID, err := s.Store.PromoteGmapsLead(r.Context(), s.actor(r), id)
+	if err != nil {
+		return translate(err)
+	}
+	httpx.JSON(w, 200, map[string]string{"company_id": companyID})
+	return nil
+}
+
 // --- worker API (machine-to-machine, Bearer WORKER_TOKEN) ---
 
 func (s *Server) requireWorker(next http.Handler) http.Handler {

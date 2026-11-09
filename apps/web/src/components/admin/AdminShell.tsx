@@ -17,6 +17,7 @@ import {
   ScrollText,
   Search,
   ShieldCheck,
+  Store,
   Tags,
   Upload,
   Users,
@@ -57,6 +58,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     title: "Discovery",
     items: [
       { href: "/admin/discovery/jobs", label: "Discovery jobs", icon: ListChecks },
+      { href: "/admin/discovery/leads", label: "Google Maps leads", icon: Store },
       { href: "/admin/discovery/results", label: "Discovery results", icon: MapPinned },
       { href: "/admin/discovery", label: "Places lookup", icon: Search },
     ],

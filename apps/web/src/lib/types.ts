@@ -197,7 +197,8 @@ export type SourceType =
   | "official_site"
   | "licensed_feed"
   | "permitted_api_lookup"
-  | "manual_verification";
+  | "manual_verification"
+  | "public_web_listing";
 
 export type DataSource = {
   id: string;
@@ -557,6 +558,30 @@ export type DiscoveryJobResult = {
   seen_count: number;
   job_location: string | null;
   job_state_code: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+};
+
+/** A business found by the Google Maps worker (gmaps_leads). */
+export type GmapsLead = {
+  id: string;
+  title: string;
+  category: string | null;
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  emails: string | null;
+  review_count: number | null;
+  review_rating: number | null;
+  business_status: string | null;
+  maps_link: string | null;
+  category_slug: string | null;
+  state_code: string | null;
+  location: string | null;
+  search_query: string | null;
+  status: "new" | "promoted" | "contacted" | "dismissed";
+  promoted_company_id: string | null;
+  seen_count: number;
   first_seen_at: string;
   last_seen_at: string;
 };

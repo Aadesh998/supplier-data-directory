@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"time"
 
+	"github.com/bharatmfg/directory/internal/normalize"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -103,4 +105,199 @@ func (s *Store) CompleteGmapsJob(ctx context.Context, jobID, workerID string, le
 		return err
 	})
 	return out, err
+}
+
+// GmapsLeadView is a gmaps_leads row for the admin review page.
+type GmapsLeadView struct {
+	ID                string    `json:"id"`
+	Title             string    `json:"title"`
+	Category          *string   `json:"category"`
+	Address           *string   `json:"address"`
+	Phone             *string   `json:"phone"`
+	Website           *string   `json:"website"`
+	Emails            *string   `json:"emails"`
+	ReviewCount       *int      `json:"review_count"`
+	ReviewRating      *float64  `json:"review_rating"`
+	BusinessStatus    *string   `json:"business_status"`
+	MapsLink          *string   `json:"maps_link"`
+	CategorySlug      *string   `json:"category_slug"`
+	StateCode         *string   `json:"state_code"`
+	Location          *string   `json:"location"`
+	SearchQuery       *string   `json:"search_query"`
+	Status            string    `json:"status"`
+	PromotedCompanyID *string   `json:"promoted_company_id"`
+	SeenCount         int       `json:"seen_count"`
+	FirstSeenAt       time.Time `json:"first_seen_at"`
+	LastSeenAt        time.Time `json:"last_seen_at"`
+}
+
+const gmapsLeadCols = `l.id, l.title, l.category, l.address, l.phone, l.website, l.emails, l.review_count, l.review_rating::float8,
+	l.business_status, l.maps_link, l.category_slug, l.state_code, l.location, j.search_query, l.status, l.promoted_company_id,
+	l.seen_count, l.first_seen_at, l.last_seen_at`
+
+func scanGmapsLead(row pgx.Row) (GmapsLeadView, error) {
+	var x GmapsLeadView
+	err := row.Scan(&x.ID, &x.Title, &x.Category, &x.Address, &x.Phone, &x.Website, &x.Emails, &x.ReviewCount, &x.ReviewRating,
+		&x.BusinessStatus, &x.MapsLink, &x.CategorySlug, &x.StateCode, &x.Location, &x.SearchQuery, &x.Status, &x.PromotedCompanyID,
+		&x.SeenCount, &x.FirstSeenAt, &x.LastSeenAt)
+	return x, err
+}
+
+// GmapsLeadFilter narrows ListGmapsLeads. Empty fields match everything.
+type GmapsLeadFilter struct {
+	Status, Category, State, Search, JobKey string
+	HasPhone, HasWebsite                    bool
+}
+
+// ListGmapsLeads lists Google Maps leads for review, newest first.
+func ListGmapsLeads(ctx context.Context, q DBTX, f GmapsLeadFilter, limit, offset int) ([]GmapsLeadView, int, error) {
+	where := `($1 = '' OR l.status = $1) AND ($2 = '' OR l.category_slug = $2) AND ($3 = '' OR l.state_code = upper($3))
+		AND ($4 = '' OR l.title ILIKE '%' || $4 || '%' OR l.address ILIKE '%' || $4 || '%' OR l.phone ILIKE '%' || $4 || '%')
+		AND ($5 = '' OR j.job_key = $5)
+		AND (NOT $6 OR COALESCE(l.phone, '') <> '') AND (NOT $7 OR COALESCE(l.website, '') <> '')`
+	args := []any{f.Status, f.Category, f.State, f.Search, f.JobKey, f.HasPhone, f.HasWebsite}
+	from := ` FROM gmaps_leads l LEFT JOIN discovery_jobs j ON j.id = l.first_job_id WHERE `
+	var total int
+	if err := q.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	out, err := collect(ctx, q, `SELECT `+gmapsLeadCols+from+where+` ORDER BY l.last_seen_at DESC, l.title LIMIT $8 OFFSET $9`,
+		func(r pgx.Rows) (GmapsLeadView, error) { return scanGmapsLead(r) }, append(args, limit, offset)...)
+	return out, total, err
+}
+
+func getGmapsLead(ctx context.Context, q DBTX, id string, lock bool) (GmapsLeadView, error) {
+	sql := `SELECT ` + gmapsLeadCols + ` FROM gmaps_leads l LEFT JOIN discovery_jobs j ON j.id = l.first_job_id WHERE l.id = $1`
+	if lock {
+		sql += ` FOR UPDATE OF l`
+	}
+	return scanGmapsLead(q.QueryRow(ctx, sql, id))
+}
+
+// SetGmapsLeadStatus marks a lead contacted or dismissed (or back to new). Promoted leads stay promoted.
+func SetGmapsLeadStatus(ctx context.Context, q DBTX, a Actor, id, status string) (GmapsLeadView, error) {
+	tag, err := q.Exec(ctx, `UPDATE gmaps_leads SET status = $2 WHERE id = $1 AND status <> 'promoted'`, id, status)
+	if err != nil {
+		return GmapsLeadView{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return GmapsLeadView{}, ErrConflict{Msg: "lead not found or already promoted"}
+	}
+	if err := Audit(ctx, q, a, "gmaps.lead_"+status, "gmaps_lead", &id, nil, nil); err != nil {
+		return GmapsLeadView{}, err
+	}
+	return getGmapsLead(ctx, q, id, false)
+}
+
+// gmapsSource returns (creating on first use) the data source for promoted Google Maps leads.
+// Internal use only: Google Maps' terms don't grant reuse, so an owner must decide before anything is public.
+func gmapsSource(ctx context.Context, tx DBTX, a Actor) (string, error) {
+	var id string
+	err := tx.QueryRow(ctx, `SELECT id FROM data_sources WHERE provider = 'google_maps_scraper' AND source_type = 'public_web_listing'
+		ORDER BY created_at LIMIT 1`).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !IsNotFound(err) {
+		return "", err
+	}
+	src, err := CreateSource(ctx, tx, a, SourceInput{SourceType: "public_web_listing", Provider: "google_maps_scraper",
+		SourceURL: ptr("https://maps.google.com"), AllowedInternalUse: ptr(true),
+		Notes: ptr("Businesses found on Google Maps by the gmaps worker. Internal use only: confirm details with each business " +
+			"(or have it register) before enabling public display.")})
+	return src.ID, err
+}
+
+// PromoteGmapsLead turns a lead into a private draft company (internal-only source) with its category,
+// location, website and phone, and flags possible duplicates.
+func (s *Store) PromoteGmapsLead(ctx context.Context, a Actor, id string) (string, error) {
+	var companyID string
+	err := s.InTx(ctx, func(tx pgx.Tx) error {
+		l, err := getGmapsLead(ctx, tx, id, true)
+		if err != nil {
+			return err
+		}
+		if l.Status == "promoted" {
+			return ErrConflict{Msg: "lead already promoted"}
+		}
+		var addr struct {
+			City       string `json:"city"`
+			PostalCode string `json:"postal_code"`
+			Street     string `json:"street"`
+			Borough    string `json:"borough"`
+		}
+		var raw []byte
+		if err := tx.QueryRow(ctx, `SELECT complete_address FROM gmaps_leads WHERE id = $1`, id).Scan(&raw); err != nil {
+			return err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &addr)
+		}
+		src, err := gmapsSource(ctx, tx, a)
+		if err != nil {
+			return err
+		}
+		name := truncateRunes(l.Title, 300)
+		in := CompanyInput{SourceID: &src, DisplayName: &name}
+		if l.Website != nil {
+			if canon, _, ok := normalize.WebsiteURL(*l.Website); ok {
+				in.WebsiteURL = &canon
+			}
+		}
+		if l.CategorySlug != nil {
+			var catID string
+			if err := tx.QueryRow(ctx, `SELECT id FROM categories WHERE slug = $1`, *l.CategorySlug).Scan(&catID); err == nil {
+				in.CategoryIDs = &[]string{catID}
+				in.PrimaryCategoryID = &catID
+			}
+		}
+		if companyID, err = createCompanyTx(ctx, tx, a, in, "draft"); err != nil {
+			return err
+		}
+		city := addr.City
+		if city == "" && l.Location != nil {
+			city = *l.Location
+		}
+		fi := FacilityInput{SourceID: src, FacilityType: "other", City: strOrNil(truncateRunes(city, 120)), StateCode: l.StateCode,
+			Locality: strOrNil(truncateRunes(addr.Borough, 120)), IsPrimary: true}
+		if l.Address != nil {
+			fi.AddressLine1 = strOrNil(truncateRunes(*l.Address, 200))
+		}
+		if pc, ok := normalize.PostalCode(addr.PostalCode); ok {
+			fi.PostalCode = &pc
+		}
+		if _, err := insertFacility(ctx, tx, companyID, fi); err != nil {
+			return err
+		}
+		// Phones are stored encrypted and never public, like imported phone numbers.
+		if l.Phone != nil {
+			if phone, ok := normalize.Phone(*l.Phone); ok {
+				enc, err := s.Box.Encrypt(phone)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO contacts (company_id, contact_type, channel, value_encrypted, value_hash, source_id,
+					lawful_basis_or_permission_ref) VALUES ($1, 'individual', 'phone', $2, $3, $4, $5)`,
+					companyID, enc, s.Box.Hash(phone), src, "gmaps_lead:"+id); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE gmaps_leads SET status = 'promoted', promoted_company_id = $2 WHERE id = $1`, id, companyID); err != nil {
+			return err
+		}
+		if _, err := FindDuplicatesFor(ctx, tx, companyID); err != nil {
+			return err
+		}
+		return Audit(ctx, tx, a, "gmaps.lead_promote", "gmaps_lead", &id, nil, map[string]any{"company_id": companyID})
+	})
+	return companyID, err
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }

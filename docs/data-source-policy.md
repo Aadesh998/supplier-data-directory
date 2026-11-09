@@ -18,6 +18,7 @@ This is the policy the software enforces. It is not legal advice; have it review
 | `authorized_import` | Your existing spreadsheet, a partner's list | none until you declare them | Declare provider, licence or permission reference, and the rights you can evidence. Unknown rights stay staged and cannot be committed. |
 | `licensed_feed` | Purchased or licensed dataset | per contract | Record the contract reference in `license_reference`. Set `retention_expires_at` to the licence end. |
 | `official_site` | The company's own website, manually reviewed | internal; public only for factual business info you are confident may be displayed | No automated crawling in v1. |
+| `public_web_listing` | Public listing sites (e.g. Google Maps, via the gmaps worker) | **internal only** by default | Listing sites' terms usually don't grant reuse. Promoted leads become private drafts; confirm details with the business (or have it register) before enabling public display. |
 | `manual_verification` | Phone call or document check by the team | internal | Also logged as `verification_events`. |
 | `permitted_api_lookup` | Google Places (disabled by default) | internal only. **The database refuses public or commercial flags.** | See below. |
 
@@ -61,6 +62,7 @@ Intended workflow: search → recognise a business → save its place ID as a le
 |---|---|---|
 | `osm_overpass` | OSM element ref (`node/123`), name, coordinates, allowlisted business tags (no phone/email) | Leads. Promotion creates a **private draft** with an internal-only `openstreetmap` source (`licensed_feed`, ODbL-1.0). Review ODbL attribution and share-alike obligations before enabling public display or commercial use for those fields. |
 | `google_places_ids` | **Place ID only.** The API discards any name/coordinates a worker sends, and a DB constraint rejects them. | Leads for one-to-one outreach; cannot be promoted. The runner requests field mask `places.id` only. |
+| `gmaps_scraper` | Name, category, address, phone, website, rating and Maps link from the Google Maps scraper, in `gmaps_leads` | Leads, reviewed in Admin → Google Maps leads. **Promote** creates a private draft company with an internal-only `google_maps_scraper` source (`public_web_listing`); phone numbers are stored encrypted and never shown publicly. |
 
 Rules:
 - Results are never published or exported automatically. They become directory data only through promotion (private draft) or the business's own registration.

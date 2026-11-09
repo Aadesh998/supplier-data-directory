@@ -37,7 +37,7 @@ func scanSource(row pgx.Row) (DataSource, error) {
 
 // SourceInput creates or updates a data source. Nil pointers mean "unchanged" on update.
 type SourceInput struct {
-	SourceType           string     `json:"source_type" validate:"omitempty,oneof=self_submission authorized_import official_site licensed_feed permitted_api_lookup manual_verification"`
+	SourceType           string     `json:"source_type" validate:"omitempty,oneof=self_submission authorized_import official_site licensed_feed permitted_api_lookup manual_verification public_web_listing"`
 	Provider             string     `json:"provider" validate:"omitempty,max=200"`
 	SourceURL            *string    `json:"source_url" validate:"omitempty,url,max=500"`
 	LicenseReference     *string    `json:"license_reference" validate:"omitempty,max=500"`

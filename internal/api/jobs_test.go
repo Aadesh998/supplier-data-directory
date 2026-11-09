@@ -270,3 +270,78 @@ func TestPublicRateLimitAndInternalBypass(t *testing.T) {
 		t.Fatalf("wrong internal token must not bypass the limit, got %d", code)
 	}
 }
+
+func TestGmapsLeadsReviewAndPromote(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	pool := e.st.Pool
+	var jobID string
+	if err := pool.QueryRow(ctx, `INSERT INTO discovery_jobs (job_key, provider, keyword, search_query, category_slug, location, state_code, latitude, longitude, radius_km)
+		VALUES ('gm1', 'gmaps_scraper', 'tiles', 'tiles manufacturer in Morbi, Gujarat', (SELECT slug FROM categories ORDER BY slug LIMIT 1), 'Morbi', 'GJ', 22.8, 70.8, 15)
+		RETURNING id`).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO gmaps_leads (place_key, first_job_id, last_job_id, category_slug, state_code, location, title, address, phone, website, complete_address)
+		 SELECT 'p1', $1, $1, category_slug, 'GJ', 'Morbi', 'Acme Tiles', '8-A Highway, Morbi, Gujarat 363642', '+91 98250 12345', 'https://acmetiles.example', '{"city":"Morbi","postal_code":"363642"}'
+		 FROM discovery_jobs WHERE id = $1`,
+		`INSERT INTO gmaps_leads (place_key, first_job_id, last_job_id, state_code, location, title) VALUES ('p2', $1, $1, 'GJ', 'Morbi', 'Beta Ceramics')`,
+	} {
+		if _, err := pool.Exec(ctx, q, jobID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reviewer := e.login("reviewer")
+	var page struct {
+		Data []struct {
+			ID                string  `json:"id"`
+			Title             string  `json:"title"`
+			Status            string  `json:"status"`
+			SearchQuery       *string `json:"search_query"`
+			PromotedCompanyID *string `json:"promoted_company_id"`
+		} `json:"data"`
+		Page struct {
+			Total int `json:"total"`
+		} `json:"page"`
+	}
+	reviewer.must("GET", "/api/v1/admin/gmaps/leads?job=gm1", nil, 200, &page)
+	if page.Page.Total != 2 || page.Data[0].SearchQuery == nil {
+		t.Fatalf("list = %+v", page)
+	}
+	reviewer.must("GET", "/api/v1/admin/gmaps/leads?has_phone=true&q=acme", nil, 200, &page)
+	if page.Page.Total != 1 || page.Data[0].Title != "Acme Tiles" {
+		t.Fatalf("filtered list = %+v", page)
+	}
+	acme := page.Data[0].ID
+	reviewer.must("POST", "/api/v1/admin/gmaps/leads/"+acme+"/promote", nil, 403, nil)
+
+	admin := e.login("admin")
+	var promoted struct {
+		CompanyID string `json:"company_id"`
+	}
+	admin.must("POST", "/api/v1/admin/gmaps/leads/"+acme+"/promote", nil, 200, &promoted)
+	admin.must("POST", "/api/v1/admin/gmaps/leads/"+acme+"/promote", nil, 409, nil)
+	admin.must("PATCH", "/api/v1/admin/gmaps/leads/"+acme, map[string]string{"status": "dismissed"}, 409, nil)
+
+	var status, city, postal, srcType string
+	var public bool
+	var phones int
+	if err := pool.QueryRow(ctx, `SELECT c.publication_status, f.city, f.postal_code, ds.source_type, ds.allowed_public_display,
+		(SELECT count(*) FROM contacts ct WHERE ct.company_id = c.id AND ct.channel = 'phone' AND ct.value IS NULL AND ct.value_encrypted IS NOT NULL)
+		FROM companies c JOIN facilities f ON f.company_id = c.id JOIN field_provenance fp ON fp.company_id = c.id AND fp.field_name = 'display_name'
+		JOIN data_sources ds ON ds.id = fp.source_id WHERE c.id = $1`, promoted.CompanyID).Scan(&status, &city, &postal, &srcType, &public, &phones); err != nil {
+		t.Fatal(err)
+	}
+	if status != "draft" || city != "Morbi" || postal != "363642" || srcType != "public_web_listing" || public || phones != 1 {
+		t.Fatalf("promoted company: status=%s city=%s postal=%s source=%s public=%v phones=%d", status, city, postal, srcType, public, phones)
+	}
+
+	reviewer.must("GET", "/api/v1/admin/gmaps/leads?q=beta", nil, 200, &page)
+	beta := page.Data[0].ID
+	reviewer.must("PATCH", "/api/v1/admin/gmaps/leads/"+beta, map[string]string{"status": "contacted"}, 200, nil)
+	reviewer.must("GET", "/api/v1/admin/gmaps/leads?status=promoted", nil, 200, &page)
+	if page.Page.Total != 1 || page.Data[0].PromotedCompanyID == nil || *page.Data[0].PromotedCompanyID != promoted.CompanyID {
+		t.Fatalf("promoted filter = %+v", page)
+	}
+}
